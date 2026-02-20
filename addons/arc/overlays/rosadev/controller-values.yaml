@@ -1,0 +1,38 @@
+# ROSA / OpenShift: gha-runner-scale-set-controller
+fullnameOverride: arc-controller
+replicaCount: 1
+image:
+  repository: ghcr.io/actions/gha-runner-scale-set-controller
+  pullPolicy: IfNotPresent
+  tag: "0.13.1"
+serviceAccount:
+  create: true
+  name: arc-controller
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: false
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 384Mi
+flags:
+  logLevel: "info"
+  logFormat: "json"
+  runnerMaxConcurrentReconciles: 2
+  updateStrategy: "eventual"
+metrics:
+  controllerManagerAddr: ":8080"
+  listenerAddr: ":8080"
+  listenerEndpoint: "/metrics"

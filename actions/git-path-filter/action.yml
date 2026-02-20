@@ -1,0 +1,47 @@
+name: 'Git Change Detector'
+description: 'Detects file changes based on YAML patterns (Python implementation of paths-filter)'
+inputs:
+  source_branch:
+    description: 'Source branch/ref (e.g. github.head_ref)'
+    required: true
+  base_ref_branch:
+    description: 'Base branch/ref (e.g. github.base_ref)'
+    required: true
+  pattern_filter:
+    description: 'YAML string defining the filters'
+    required: true
+  github_token:
+    description: 'GitHub Token for git operations'
+    required: false
+    default: ${{ github.token }}
+outputs:
+  changes:
+    description: 'JSON array of keys that have changes'
+    value: ${{ steps.detect.outputs.changes }}
+  changes_json:
+    description: 'JSON object containing full change details (has_changes, files) for all keys'
+    value: ${{ steps.detect.outputs.changes_json }}
+runs:
+  using: "composite"
+  steps:
+    - name: Install Python dependencies
+      run: pip install -r ${{ github.action_path }}/requirements.txt
+      shell: bash
+
+    - name: Write filter spec to file
+      run: |
+        cat <<EOF > filter_spec.yaml
+        ${{ inputs.pattern_filter }}
+        EOF
+      shell: bash
+
+    - name: Run detection script
+      id: detect
+      run: |
+        python3 ${{ github.action_path }}/main.py \
+          --base-ref "${{ inputs.base_ref_branch }}" \
+          --source-ref "${{ inputs.source_branch }}" \
+          --filter-spec "filter_spec.yaml"
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}

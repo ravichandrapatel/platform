@@ -1,0 +1,60 @@
+# ROSA / OpenShift: gha-runner-scale-set (edit githubConfigUrl and runner image as needed)
+fullnameOverride: arc-scale-set
+githubConfigUrl: "https://github.com/YOUR_ORG_OR_ENTERPRISE"
+githubConfigSecret: arc-gh-secret
+
+minRunners: 0
+maxRunners: 3
+runnerGroup: "default"
+
+controllerServiceAccount:
+  namespace: arc-system
+  name: arc-controller
+
+template:
+  spec:
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1001
+      runAsGroup: 123
+      fsGroup: 123
+      allowPrivilegeEscalation: true
+      seccompProfile:
+        type: RuntimeDefault
+    containers:
+      - name: runner
+        image: ghcr.io/your-registry/gh-actions-runner:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/usr/bin/entrypoint.sh"]
+        env:
+          - name: RUNNER_HOME
+            value: "/home/runner"
+          - name: ACTIONS_RUNNER_CONTAINER_HOOKS
+            value: "/home/runner/k8s/index.js"
+          - name: ACTIONS_RUNNER_POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
+            value: "true"
+        securityContext:
+          allowPrivilegeEscalation: true
+          capabilities:
+            drop: [ALL]
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 1001
+          runAsGroup: 123
+        resources:
+          requests:
+            cpu: 100m
+            memory: 384Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        volumeMounts:
+          - name: work
+            mountPath: /home/runner/_work
+    volumes:
+      - name: work
+        emptyDir: {}

@@ -1,0 +1,104 @@
+# GitHub Actions Runner (ARC-style) on UBI9, rootless Podman/Buildah only.
+# Build with: buildah build (or podman build). No other container runtime references.
+# Runner, k8s hooks, and tools under /home/runner. Runs as non-root (UID 1001, GID 123).
+#
+# Validated for OpenShift SCC overlays/rosadev/scc-github-arc.yaml:
+#   - runAsUser MustRunAs 1001 -> image user "runner" UID 1001
+#   - fsGroup/supplementalGroups 123 -> image group "runner" GID 123; pod uses runAsGroup/fsGroup 123
+#   - Pod securityContext runAsUser: 1001, runAsGroup: 123, fsGroup: 123, runAsNonRoot: true
+
+# ------------------------------------------------------------------------------
+# Stage 1: Runner assets (UBI9; runner binary only, no Ubuntu)
+# ------------------------------------------------------------------------------
+FROM registry.access.redhat.com/ubi9/ubi AS build
+
+ARG TARGETPLATFORM
+ARG RUNNER_VERSION=2.321.0
+ARG RUNNER_CONTAINER_HOOKS_VERSION=0.8.1
+
+# Update base for compliance; do not change RUNNER_VERSION / RUNNER_CONTAINER_HOOKS_VERSION
+RUN dnf update -y --nodocs --setopt=install_weak_deps=False \
+    && dnf install -y --nodocs --setopt=install_weak_deps=False curl unzip ca-certificates \
+    && dnf clean all
+
+RUN test -n "$TARGETPLATFORM" || (echo "TARGETPLATFORM must be set" && false)
+
+WORKDIR /runner-assets
+
+RUN export ARCH=$(echo ${TARGETPLATFORM} | cut -d / -f2) \
+    && if [ "$ARCH" = "amd64" ] || [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "i386" ]; then export ARCH=x64; fi \
+    && if [ "$ARCH" = "arm64" ]; then export ARCH=arm64; fi \
+    && curl -fLo runner.tar.gz "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-${ARCH}-${RUNNER_VERSION}.tar.gz" \
+    && tar xzf runner.tar.gz && rm runner.tar.gz
+
+# k8s hooks (not k8s-novolume) under /home/runner/k8s
+RUN curl -fLo k8s-hooks.zip "https://github.com/actions/runner-container-hooks/releases/download/v${RUNNER_CONTAINER_HOOKS_VERSION}/actions-runner-hooks-k8s-${RUNNER_CONTAINER_HOOKS_VERSION}.zip" \
+    && unzip -q k8s-hooks.zip -d ./k8s && rm k8s-hooks.zip
+
+# ------------------------------------------------------------------------------
+# Stage 2: UBI9 + rootless Podman/Buildah, non-root runner (1001:123)
+# ------------------------------------------------------------------------------
+FROM registry.access.redhat.com/ubi9/ubi
+
+ARG TARGETPLATFORM=linux/amd64
+ARG RUNNER_VERSION=2.321.0
+ARG DUMB_INIT_VERSION=1.2.5
+ARG RUNNER_UID=1001
+ARG RUNNER_GID=123
+ARG SUBUID_COUNT=100000
+
+ENV RUNNER_HOME=/home/runner
+ENV RUNNER_MANUALLY_TRAP_SIG=1
+ENV ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT=1
+ENV ImageOS=linux
+ENV PODMAN_USERNS=keep-id
+ENV HOME=/home/runner
+
+# Update base for compliance; do not change RUNNER_VERSION
+RUN dnf update -y --nodocs --setopt=install_weak_deps=False \
+    && dnf install -y --nodocs --setopt=install_weak_deps=False \
+        git sudo curl jq unzip ca-certificates shadow-utils \
+        podman buildah crun fuse-overlayfs slirp4netns \
+    && dnf clean all
+
+# dumb-init for signal handling
+RUN export ARCH=$(echo ${TARGETPLATFORM} | cut -d / -f2) \
+    && if [ "$ARCH" = "arm64" ]; then ARCH=aarch64; fi \
+    && if [ "$ARCH" = "amd64" ] || [ "$ARCH" = "x86_64" ]; then ARCH=x86_64; fi \
+    && curl -fLo /usr/bin/dumb-init "https://github.com/Yelp/dumb-init/releases/download/v${DUMB_INIT_VERSION}/dumb-init_${DUMB_INIT_VERSION}_${ARCH}" \
+    && chmod +x /usr/bin/dumb-init
+
+# Non-root user/group to match OpenShift SCC (uid 1001, gid 123); sudo so runner avoids forbidden errors
+RUN groupadd -r -g ${RUNNER_GID} runner \
+    && useradd -r -u ${RUNNER_UID} -g runner -m -s /bin/bash -d /home/runner runner \
+    && usermod -aG wheel runner \
+    && echo '%wheel ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/wheel \
+    && chmod 440 /etc/sudoers.d/wheel
+
+# Subordinate UID/GID for rootless Podman/Buildah
+RUN echo "runner:100000:${SUBUID_COUNT}" >> /etc/subuid \
+    && echo "runner:100000:${SUBUID_COUNT}" >> /etc/subgid
+
+# ARC scripts
+COPY runner/entrypoint.sh runner/startup.sh runner/logger.sh runner/graceful-stop.sh runner/update-status /usr/bin/
+RUN chmod +x /usr/bin/entrypoint.sh /usr/bin/startup.sh /usr/bin/update-status
+
+# ARC hooks
+COPY runner/hooks/job-started.sh runner/hooks/job-completed.sh /etc/arc/hooks/
+COPY runner/hooks/job-started.d runner/hooks/job-completed.d /etc/arc/hooks/
+RUN chmod +x /etc/arc/hooks/job-started.sh /etc/arc/hooks/job-completed.sh \
+    && chmod +x /etc/arc/hooks/job-started.d/* /etc/arc/hooks/job-completed.d/*
+
+# Runner + k8s hooks under /home/runner, owned by runner:runner (1001:123)
+RUN mkdir -p /home/runner
+COPY --from=build /runner-assets /home/runner
+RUN chown -R runner:runner /home/runner
+
+# PAM-like env for runner process
+RUN echo "PATH=/usr/bin:/bin" > /etc/environment && echo "ImageOS=${ImageOS}" >> /etc/environment
+
+RUN mkdir -p /opt/hostedtoolcache && chown runner:runner /opt/hostedtoolcache && chmod 775 /opt/hostedtoolcache
+
+USER runner
+
+ENTRYPOINT ["/usr/bin/entrypoint.sh"]

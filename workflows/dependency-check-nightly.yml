@@ -1,0 +1,82 @@
+# =============================================================================
+# Dependency-Check UBI9 (nightly) – platform copy
+# =============================================================================
+# Same as root .github/workflows/dependency-check-nightly.yml. Builds the
+# Dependency-Check UBI9 image and pushes to registry (default GHCR).
+#
+# ACTIONS: Only actions/checkout@v4. No third-party actions; no docker/*.
+# =============================================================================
+
+name: Dependency-Check UBI9 (nightly)
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: dependency-check-ubi9
+  REGISTRY: ghcr.io
+  REPOSITORY: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # --- Only actions/checkout@v4; no third-party, no docker/* ---
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Buildah (if neither Podman nor Buildah present)
+        run: |
+          if ! command -v podman &>/dev/null && ! command -v buildah &>/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y buildah
+          fi
+
+      - name: Detect container runtime (Podman or Buildah)
+        id: runtime
+        run: |
+          if command -v podman &>/dev/null; then
+            echo "runtime=podman" >> $GITHUB_OUTPUT
+          elif command -v buildah &>/dev/null; then
+            echo "runtime=buildah" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Neither Podman nor Buildah is available."
+            exit 1
+          fi
+
+      - name: Build image
+        run: |
+          RT="${{ steps.runtime.outputs.runtime }}"
+          $RT build \
+            --tag ${{ env.IMAGE_NAME }}:latest \
+            --file platform/images/dependency-check-ubi9/Containerfile \
+            --build-arg NVD_API_KEY="${{ secrets.NVD_API_KEY }}" \
+            platform/images/dependency-check-ubi9
+
+      - name: Log in to registry
+        run: |
+          RT="${{ steps.runtime.outputs.runtime }}"
+          REG="${{ env.REGISTRY }}"
+          if [ "$REG" = "ghcr.io" ]; then
+            echo "${{ secrets.GITHUB_TOKEN }}" | $RT login ghcr.io -u ${{ github.actor }} --password-stdin
+          else
+            echo "${{ secrets.CONTAINER_REGISTRY_PASSWORD }}" | $RT login "$REG" -u "${{ secrets.CONTAINER_REGISTRY_USERNAME }}" --password-stdin
+          fi
+
+      - name: Push image
+        run: |
+          RT="${{ steps.runtime.outputs.runtime }}"
+          REG="${{ env.REGISTRY }}"
+          REPO="${{ env.REPOSITORY }}"
+          IMG="$REG/$REPO/${{ env.IMAGE_NAME }}"
+          IMAGE_ID=$($RT images -q ${{ env.IMAGE_NAME }}:latest)
+          $RT tag $IMAGE_ID "$IMG:latest"
+          $RT push "$IMG:latest"
+          $RT tag $IMAGE_ID "$IMG:${{ github.run_id }}"
+          $RT push "$IMG:${{ github.run_id }}"

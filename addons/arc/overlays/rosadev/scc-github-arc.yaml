@@ -1,0 +1,50 @@
+# Based on restricted SCC; allows ARC runner pods to run as UID 1001 / GID 123 (non-root).
+# See: https://developers.redhat.com/articles/2025/02/17/how-securely-deploy-github-arc-openshift
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: github-arc
+  annotations:
+    kubernetes.io/description: "ARC runner scale set; non-root uid 1001, gid 123"
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+allowPrivilegeEscalation: true
+allowPrivilegedContainer: false
+allowedCapabilities: null
+defaultAddCapabilities: null
+fsGroup:
+  type: MustRunAs
+  ranges:
+    - min: 123
+      max: 123
+groups: []
+priority: null
+readOnlyRootFilesystem: false
+requiredDropCapabilities:
+  - KILL
+  - MKNOD
+  - SETUID
+  - SETGID
+runAsUser:
+  type: MustRunAs
+  uid: 1001
+seLinuxContext:
+  type: MustRunAs
+supplementalGroups:
+  type: MustRunAs
+  ranges:
+    - min: 123
+      max: 123
+users: []
+volumes:
+  - configMap
+  - csi
+  - downwardAPI
+  - emptyDir
+  - ephemeral
+  - persistentVolumeClaim
+  - projected
+  - secret

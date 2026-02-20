@@ -1,0 +1,90 @@
+name: 'Janitor Bot'
+description: 'Scan or cleanup stale branches and PRs; supports one repo, multiple repos, entire org, or topic-filtered repos'
+inputs:
+  mode:
+    description: 'Run mode: scan (report only) or cleanup'
+    required: true
+    default: 'scan'
+  gh_token:
+    description: 'GitHub PAT (e.g. JANITOR_BOT_PAT) for API access'
+    required: true
+  scope:
+    description: 'What to scan: org (all org repos), repo (single), repos (multiple), topic (org repos with topic)'
+    required: false
+    default: 'org'
+  org_name:
+    description: 'GitHub org (or owner). Required for scope=org|topic; default owner for scope=repo|repos when repo name has no owner/'
+    required: false
+    default: ${{ github.repository_owner }}
+  repo:
+    description: 'Single repo: name (use org_name as owner) or owner/repo'
+    required: false
+    default: ''
+  repos:
+    description: 'Multiple repos: comma or newline separated names or owner/repo'
+    required: false
+    default: ''
+  repo_topic:
+    description: 'GitHub topic (tag) to filter org repos; used when scope=topic'
+    required: false
+    default: ''
+  branch_stale_days:
+    description: 'Branches older than this many days are considered stale'
+    required: false
+    default: '45'
+  branch_exclude_regex:
+    description: 'Regex for branch names to never touch (e.g. main, master, develop)'
+    required: false
+    default: '^(main|master|develop)$'
+  branch_protect_pr:
+    description: 'Skip branches that have an open PR'
+    required: false
+    default: 'true'
+  pr_stale_days:
+    description: 'PRs older than this many days are considered stale'
+    required: false
+    default: '30'
+  pr_exclude_labels:
+    description: 'Comma-separated labels; PRs with any of these are excluded'
+    required: false
+    default: 'pinned'
+  pkg_keep_count:
+    description: 'Number of package versions to keep'
+    required: false
+    default: '5'
+  dry_run:
+    description: 'If true, do not perform destructive actions'
+    required: false
+    default: 'true'
+  batch_delay_seconds:
+    description: 'Optional delay in seconds between repos to reduce API burst (throttling)'
+    required: false
+    default: '0'
+outputs:
+  report_path:
+    description: 'Path to the generated Markdown report (scan mode)'
+    value: ${{ steps.janitor.outputs.report_path }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Run Janitor Bot
+      id: janitor
+      run: |
+        python3 "${{ github.action_path }}/janitor.py" --mode "${{ inputs.mode }}"
+        echo "report_path=janitor_report.md" >> "$GITHUB_OUTPUT"
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.gh_token }}
+        SCOPE: ${{ inputs.scope }}
+        ORG_NAME: ${{ inputs.org_name }}
+        REPO: ${{ inputs.repo }}
+        REPOS: ${{ inputs.repos }}
+        REPO_TOPIC: ${{ inputs.repo_topic }}
+        BRANCH_STALE_DAYS: ${{ inputs.branch_stale_days }}
+        BRANCH_EXCLUDE_REGEX: ${{ inputs.branch_exclude_regex }}
+        BRANCH_PROTECT_PR: ${{ inputs.branch_protect_pr }}
+        PR_STALE_DAYS: ${{ inputs.pr_stale_days }}
+        PR_EXCLUDE_LABELS: ${{ inputs.pr_exclude_labels }}
+        PKG_KEEP_COUNT: ${{ inputs.pkg_keep_count }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        BATCH_DELAY_SECONDS: ${{ inputs.batch_delay_seconds }}

@@ -1,0 +1,25 @@
+# ROSA / OpenShift dev. Apply: kubectl apply -k addons/arc/overlays/rosadev/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: arc-system
+
+resources:
+  - ../../base
+  - scc-github-arc.yaml
+  - clusterrole-scc-github-arc.yaml
+  - rolebinding-scc.yaml
+
+helmCharts:
+  - name: gha-runner-scale-set-controller
+    repo: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+    version: "0.13.1"
+    releaseName: arc-controller
+    namespace: arc-system
+    valuesFile: controller-values.yaml
+  - name: gha-runner-scale-set
+    repo: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+    version: "0.13.1"
+    releaseName: arc-scale-set
+    namespace: arc-system
+    valuesFile: scale-set-values.yaml

@@ -1,0 +1,226 @@
+# ==============================================================================
+# VAULT "GOLD STANDARD" PRODUCTION CONFIGURATION (2026)
+# Platform: EKS (Uncommented) | GKE & AKS (Commented Alternatives)
+# ==============================================================================
+
+global:
+  enabled: true
+  tlsDisable: false # E2E TLS is enabled
+
+server:
+  replicas: 3
+  # 1. SECURITY CONTEXT (Hardening as per CIS Benchmarks)
+  # ----------------------------------------------------------------------------
+  securityContext:
+    runAsNonRoot: true
+    runAsGroup: 1000
+    runAsUser: 100
+    fsGroup: 1000
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false # Required for internal Vault operations
+
+  # 2. IDENTITY: PRIMARY SERVER SERVICE ACCOUNT (EKS/IRSA)
+  # ----------------------------------------------------------------------------
+  serviceAccount:
+    create: true
+    name: "vault-server-sa"
+    annotations:
+      # EKS Primary
+      eks.amazonaws.com/role-arn: "arn:aws:iam::1234567890:role/vault-kms-unseal"
+      # GKE Alternative
+      # iam.gke.io/gcp-service-account: "vault-server@PROJECT.iam.gserviceaccount.com"
+      # AKS Alternative
+      # azure.workload.identity/client-id: "AZURE_CLIENT_ID"
+
+  # 3. DUAL-DISK PERSISTENCE (Raft + Audit Safety)
+  # ----------------------------------------------------------------------------
+  dataStorage:
+    enabled: true
+    size: 100Gi
+    storageClass: "gp3" # AKS: managed-csi-premium-zrs | GKE: premium-rwo
+    mountPath: "/vault/data"
+
+  auditStorage:
+    enabled: true
+    size: 50Gi
+    storageClass: "gp3"
+    mountPath: "/vault/audit"
+
+  # 4. HIGH AVAILABILITY & AUTO-UNSEAL
+  # ----------------------------------------------------------------------------
+  ha:
+    enabled: true
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = true
+        storage "raft" {
+          path = "/vault/data"
+          retry_join { leader_api_addr = "http://vault-0.vault-internal:8200" }
+          retry_join { leader_api_addr = "http://vault-1.vault-internal:8200" }
+          retry_join { leader_api_addr = "http://vault-2.vault-internal:8200" }
+        }
+
+        # --- EKS PRIMARY SEAL (AWS KMS) ---
+        seal "awskms" {
+          region     = "us-east-1"
+          kms_key_id = "arn:aws:kms:us-east-1:12345:key/master-unseal"
+        }
+
+        # --- GKE SEAL (GCP KMS) ---
+        # seal "gcpkms" { 
+        #  project="P", 
+        #  region="global", 
+        #  key_ring="K", 
+        #  crypto_key="V" 
+        }
+
+        # --- AKS SEAL (Azure Key Vault) ---
+        # seal "azurekeyvault" { 
+        #  tenant_id="tenant_id", 
+        #  vault_name="vault-kv", 
+        #  key_name="K" 
+        }
+
+        listener "tcp" {
+          address = "[::]:8200"
+          tls_cert_file = "/vault/userconfig/vault-server-tls/tls.crt"
+          tls_key_file  = "/vault/userconfig/vault-server-tls/tls.key"
+          max_request_size = 33554432
+        }
+
+  # 5. LEAST PRIVILEGE AUTOMATION (Separate SAs for Audit & Backup)
+  # ----------------------------------------------------------------------------
+  extraObjects:
+    # A. AUDIT INITIALIZER (Identity: Admin/Sudo only)
+    - apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: vault-audit-init-sa
+    - apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: vault-setup-audit
+      spec:
+        template:
+          spec:
+            serviceAccountName: vault-audit-init-sa
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+            containers:
+              - name: init
+                image: hashicorp/vault:latest
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities: { drop: ["ALL"] }
+                env: 
+                 - name: "VAULT_ADDR"
+                   value: "https://vault-active.vault.svc.cluster.local:8200"
+                 - name: "VAULT_CACERT"
+                   value: "/vault/tls/ca.crt"
+                volumeMounts:
+                  - name: vault-server-tls
+                    mountPath: /vault/tls
+                    readOnly: true
+                command: ["/bin/sh", "-c"]
+                args:
+                  - |
+                    JWT=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+                    export VAULT_TOKEN=$(vault write -field=token auth/kubernetes/login role=audit-init-role jwt=$JWT)
+                    vault audit enable file file_path=stdout || true
+                    vault audit enable -path=backup_file file file_path=/vault/audit/backup.log || true
+            volumes:
+              - name: vault-server-tls
+                secret:
+                  secretName: vault-server-tls
+    # B. BACKUP WORKER (Identity: Cloud Storage Write only)
+    - apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: vault-backup-sa
+        annotations:
+          eks.amazonaws.com/role-arn: "arn:aws:iam::12345:role/vault-s3-backup-only"
+          # GKE: iam.gke.io/gcp-service-account: "vault-backup@PROJECT.iam.gserviceaccount.com"
+          # AKS: azure.workload.identity/client-id: "BACKUP_CLIENT_ID"
+    - apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: vault-daily-snapshot
+      spec:
+        schedule: "0 2 * * *"
+        jobTemplate:
+          spec:
+            template:
+              spec:
+                serviceAccountName: vault-backup-sa
+                securityContext:
+                  runAsNonRoot: true
+                  runAsUser: 1000
+                containers:
+                  - name: backup
+                    image: amazon/aws-cli:latest # GKE: google/cloud-sdk | AKS: mcr.microsoft.com/azure-cli
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      capabilities: { drop: ["ALL"] }
+                    env: 
+                    - name: "VAULT_ADDR"
+                      value: "https://vault-active.vault.svc.cluster.local:8200"
+                    - name: "VAULT_CACERT"
+                      value: "/vault/tls/ca.crt"
+                    volumeMounts:
+                      - name: vault-server-tls
+                        mountPath: /vault/tls
+                        readOnly: true
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        # 1. Login with OIDC/JWT to get a BATCH token
+                        JWT=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+                        export VAULT_TOKEN=$(vault write -field=token auth/kubernetes/login \
+                          role=backup-role \
+                          jwt=$JWT \
+                          type=batch) # Use BATCH to avoid Raft write-pressure
+
+                        # 2. Performance Check (Applied vs Commit Index)
+                        STATUS=$(vault status -format=json)
+                        APPLIED=$(echo $STATUS | jq -r '.raft_applied_index')
+                        COMMIT=$(echo $STATUS | jq -r '.raft_committed_index')
+                        if [ $((COMMIT - APPLIED)) -gt 10 ]; then
+                          echo "Cluster lagging. Skipping snapshot."
+                          exit 0
+                        fi
+
+                        # 3. Snapshot and Ship
+                        FILE_NAME="vault-$(date +%F-%H%M).snap"
+                        vault operator raft snapshot save /tmp/$FILE_NAME
+                        # EKS: aws s3 cp /tmp/vault.snap s3://vault-backups/$(date +%F).snap
+                        # GKE: gcloud storage cp /tmp/vault.snap gs://vault-backups/$(date +%F).snap
+                        # AKS: az storage blob upload --container-name backups --file /tmp/vault.snap --name $(date +%F).snap
+                restartPolicy: OnFailure
+                volumes:
+                  - name: vault-server-tls
+                    secret:
+                      secretName: vault-server-tls
+
+  # 6. TLS & MOUNTS
+  # ----------------------------------------------------------------------------
+  extraVolumes:
+    - type: secret
+      name: vault-server-tls
+
+# 7. RESOURCE SIZING
+# ----------------------------------------------------------------------------
+resources:
+  requests:
+    cpu: "2000m"
+    memory: "4Gi"
+  limits:
+    cpu: "4000m"
+    memory: "8Gi"

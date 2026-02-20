@@ -1,0 +1,37 @@
+# gha-runner-scale-set-controller on UBI9: copy all binaries from upstream image (no build).
+# Upstream uses distroless; we copy manager, ghalistener, github-webhook-server, actions-metrics-server, sleep into UBI9 minimal.
+# Build: buildah/podman build. Push to your registry and set controller-values.yaml image.
+
+ARG CONTROLLER_TAG=0.13.1
+
+# ------------------------------------------------------------------------------
+# Stage 1: Binaries from official upstream image
+# ------------------------------------------------------------------------------
+FROM ghcr.io/actions/gha-runner-scale-set-controller:${CONTROLLER_TAG} AS upstream
+
+# ------------------------------------------------------------------------------
+# Stage 2: UBI9 minimal runtime with all binaries (non-root 1000:1000)
+# ------------------------------------------------------------------------------
+FROM registry.access.redhat.com/ubi9/ubi-minimal
+
+ARG CONTROLLER_TAG=0.13.1
+
+LABEL org.opencontainers.image.source="https://github.com/actions/actions-runner-controller" \
+      org.opencontainers.image.description="gha-runner-scale-set-controller (UBI9)" \
+      org.opencontainers.image.version="${CONTROLLER_TAG}"
+
+# Update base for compliance; CONTROLLER_TAG is not changed
+RUN microdnf update -y && microdnf install -y shadow-utils && microdnf clean all \
+    && groupadd -r -g 1000 arc \
+    && useradd -r -u 1000 -g arc -d /home/arc arc
+
+COPY --from=upstream /manager .
+COPY --from=upstream /github-webhook-server .
+COPY --from=upstream /actions-metrics-server .
+COPY --from=upstream /ghalistener .
+COPY --from=upstream /sleep .
+
+USER 1000:1000
+WORKDIR /
+
+ENTRYPOINT ["/manager"]

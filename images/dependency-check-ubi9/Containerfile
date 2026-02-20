@@ -1,0 +1,41 @@
+# OWASP Dependency-Check on UBI9 (minimal). NVD DB updated at build with --updateonly.
+# Use this Containerfile only (no Dockerfile). Build: buildah/podman build. Run: use the image (e.g. from nightly).
+# Based on: https://github.com/dependency-check/Dependency-Check_Action
+
+FROM registry.access.redhat.com/ubi9/ubi
+
+ARG DEPENDENCY_CHECK_VERSION=12.2.0
+ARG NVD_API_KEY=""
+
+LABEL org.opencontainers.image.source="https://github.com/dependency-check/Dependency-Check_Action" \
+      org.opencontainers.image.description="OWASP Dependency-Check (UBI9 minimal)" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+# Update base for compliance; do not change DEPENDENCY_CHECK_VERSION
+RUN dnf update -y --nodocs --setopt=install_weak_deps=False \
+    && dnf install -y --nodocs --setopt=install_weak_deps=False \
+        java-17-openjdk-headless unzip wget \
+    && wget -q -O /tmp/dc.zip \
+       "https://github.com/dependency-check/DependencyCheck/releases/download/v${DEPENDENCY_CHECK_VERSION}/dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip" \
+    && unzip -q /tmp/dc.zip -d /tmp && mv /tmp/dependency-check /usr/share/dependency-check && rm /tmp/dc.zip \
+    && if [ -n "${NVD_API_KEY}" ]; then \
+         /usr/share/dependency-check/bin/dependency-check.sh --updateonly \
+           --nvdApiKey "${NVD_API_KEY}" --nvdApiDelay 3500; \
+       else \
+         /usr/share/dependency-check/bin/dependency-check.sh --updateonly \
+           --nvdApiDelay 8000 --nvdMaxRetryCount 10; \
+       fi \
+    && dnf remove -y wget unzip && dnf clean all && rm -rf /var/cache/dnf
+
+RUN useradd -r -u 1001 -d /src depcheck \
+    && mkdir -p /src /report \
+    && chown -R depcheck:depcheck /src /report /usr/share/dependency-check/data
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+USER 1001
+WORKDIR /src
+VOLUME ["/src", "/report"]
+
+ENTRYPOINT ["/entrypoint.sh"]

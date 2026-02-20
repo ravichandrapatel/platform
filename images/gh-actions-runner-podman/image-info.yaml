@@ -1,0 +1,3 @@
+name: gh-actions-runner-podman
+base: UBI9
+purpose: ARC self-hosted runner with rootless Podman/Buildah.

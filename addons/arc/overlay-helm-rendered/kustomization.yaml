@@ -1,0 +1,12 @@
+# Use after: make -C addons/arc generate
+# Then: kubectl apply -k addons/arc/overlay-helm-rendered/
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: arc-system
+
+resources:
+  - ../base
+  - ../manifests/controller.yaml
+  - ../manifests/scale-set.yaml
