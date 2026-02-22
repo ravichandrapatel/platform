@@ -1,11 +1,13 @@
 # Based on restricted SCC; allows ARC runner pods to run as UID 1001 / GID 123 (non-root).
+# SETUID/SETGID are not dropped so rootless Podman can use newuidmap/newgidmap (e.g. for
+# dependency-check and other container-in-container workflows). See Red Hat solution 7045022.
 # See: https://developers.redhat.com/articles/2025/02/17/how-securely-deploy-github-arc-openshift
 apiVersion: security.openshift.io/v1
 kind: SecurityContextConstraints
 metadata:
   name: github-arc
   annotations:
-    kubernetes.io/description: "ARC runner scale set; non-root uid 1001, gid 123"
+    kubernetes.io/description: "ARC runner scale set; non-root uid 1001, gid 123; rootless Podman (newuidmap) allowed"
 allowHostDirVolumePlugin: false
 allowHostIPC: false
 allowHostNetwork: false
@@ -13,7 +15,11 @@ allowHostPID: false
 allowHostPorts: false
 allowPrivilegeEscalation: true
 allowPrivilegedContainer: false
-allowedCapabilities: null
+# Allow runner pod to add SETUID/SETGID (newuidmap) and SYS_ADMIN (crun mount proc in nested container).
+allowedCapabilities:
+  - SETUID
+  - SETGID
+  - SYS_ADMIN
 defaultAddCapabilities: null
 fsGroup:
   type: MustRunAs
@@ -23,11 +29,10 @@ fsGroup:
 groups: []
 priority: null
 readOnlyRootFilesystem: false
+# Do not drop SETUID/SETGID: rootless Podman needs them for newuidmap/newgidmap (user namespace setup).
 requiredDropCapabilities:
   - KILL
   - MKNOD
-  - SETUID
-  - SETGID
 runAsUser:
   type: MustRunAs
   uid: 1001

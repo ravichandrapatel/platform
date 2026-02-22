@@ -548,6 +548,9 @@ runs:
 
     - name: Run Dependency-Check
       shell: bash
+      env:
+        # Force vfs so Podman works without /dev/fuse (e.g. in ARC/OpenShift runner pods)
+        CONTAINERS_STORAGE_DRIVER: vfs
       run: |
         set -e
         IMAGE="${{ steps.image.outputs.image }}"
@@ -706,6 +709,9 @@ runs:
         [ "${{ inputs.hostedSuppressionsForceUpdate }}" = 'true' ]     && EXTRA+=(--hostedSuppressionsForceUpdate)
 
         $RUNNER run --rm \
+          --cgroups=disabled \
+          --security-opt unmask=/proc \
+          --security-opt unmask=/sys \
           -v "$GITHUB_WORKSPACE:$WS:z" \
           -w $WS \
           "$IMAGE" \

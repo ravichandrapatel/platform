@@ -2,6 +2,11 @@
 # Build with: buildah build (or podman build). No other container runtime references.
 # Runner, k8s hooks, and tools under /home/runner. Runs as non-root (UID 1001, GID 123).
 #
+# Rootless Podman/Buildah tuning follows Red Hat guidance for OpenShift:
+#   https://www.redhat.com/en/blog/rootless-podman-jenkins-openshift
+# - Buildah ENV (chroot isolation, vfs); newuidmap/newgidmap sticky bit removed + setcap;
+# - Loosened permissions on dirs used by build tools (alternatives, jvm, etc.).
+#
 # Validated for OpenShift SCC overlays/rosadev/scc-github-arc.yaml:
 #   - runAsUser MustRunAs 1001 -> image user "runner" UID 1001
 #   - fsGroup/supplementalGroups 123 -> image group "runner" GID 123; pod uses runAsGroup/fsGroup 123
@@ -53,12 +58,20 @@ ENV ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT=1
 ENV ImageOS=linux
 ENV PODMAN_USERNS=keep-id
 ENV HOME=/home/runner
+# Use vfs storage so rootless Podman works without /dev/fuse (e.g. in OpenShift pods).
+# Override with CONTAINERS_STORAGE_DRIVER=overlay if /dev/fuse is available and preferred.
+ENV CONTAINERS_STORAGE_DRIVER=vfs
+# Rootless Buildah/Podman: no user namespace wrap, chroot isolation, vfs (per Red Hat OpenShift blog).
+ENV _BUILDAH_STARTED_IN_USERNS="" \
+    BUILDAH_ISOLATION=chroot \
+    STORAGE_DRIVER=vfs
 
-# Update base for compliance; do not change RUNNER_VERSION
+# Update base for compliance; do not change RUNNER_VERSION. Exclude container-selinux for rootless (blog).
 RUN dnf update -y --nodocs --setopt=install_weak_deps=False \
     && dnf install -y --nodocs --setopt=install_weak_deps=False \
-        git sudo curl jq unzip ca-certificates shadow-utils \
-        podman buildah crun fuse-overlayfs slirp4netns \
+        git sudo curl jq unzip ca-certificates shadow-utils libcap \
+        podman buildah skopeo crun fuse-overlayfs slirp4netns \
+        --exclude=container-selinux \
     && dnf clean all
 
 # dumb-init for signal handling
@@ -67,6 +80,19 @@ RUN export ARCH=$(echo ${TARGETPLATFORM} | cut -d / -f2) \
     && if [ "$ARCH" = "amd64" ] || [ "$ARCH" = "x86_64" ]; then ARCH=x86_64; fi \
     && curl -fLo /usr/bin/dumb-init "https://github.com/Yelp/dumb-init/releases/download/v${DUMB_INIT_VERSION}/dumb-init_${DUMB_INIT_VERSION}_${ARCH}" \
     && chmod +x /usr/bin/dumb-init
+
+# Rootless Podman/Buildah: fix newuidmap/newgidmap (sticky bit + capabilities). Required for user namespace
+# mapping in OpenShift; see https://www.redhat.com/en/blog/rootless-podman-jenkins-openshift
+RUN chmod u-s /usr/bin/newuidmap /usr/bin/newgidmap 2>/dev/null || true \
+    && /usr/sbin/setcap cap_setuid+eip /usr/bin/newuidmap 2>/dev/null || true \
+    && /usr/sbin/setcap cap_setgid+eip /usr/bin/newgidmap 2>/dev/null || true
+
+# Loosen permissions on dirs used by build tools (Java, alternatives, etc.) so rootless builds can write
+RUN mkdir -p /var/lib/origin \
+    && chmod 775 /var/lib/origin \
+    && chmod -R 775 /etc/alternatives /var/lib/alternatives 2>/dev/null || true \
+    && chmod -R 775 /usr/lib/jvm 2>/dev/null || true \
+    && chmod 775 /usr/share/man/man1 2>/dev/null || true
 
 # Non-root user/group to match OpenShift SCC (uid 1001, gid 123); sudo so runner avoids forbidden errors
 RUN groupadd -r -g ${RUNNER_GID} runner \
@@ -93,6 +119,11 @@ RUN chmod +x /etc/arc/hooks/job-started.sh /etc/arc/hooks/job-completed.sh \
 RUN mkdir -p /home/runner
 COPY --from=build /runner-assets /home/runner
 RUN chown -R runner:runner /home/runner
+
+# Rootless Podman: force vfs storage (no FUSE) and disable default_sysctls (no ping_group_range)
+RUN mkdir -p /home/runner/.config/containers
+COPY runner/containers/storage.conf runner/containers/containers.conf /home/runner/.config/containers/
+RUN chown -R runner:runner /home/runner/.config
 
 # PAM-like env for runner process
 RUN echo "PATH=/usr/bin:/bin" > /etc/environment && echo "ImageOS=${ImageOS}" >> /etc/environment

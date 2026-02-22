@@ -1,0 +1,158 @@
+# =============================================================================
+# Platform Component Manager
+# =============================================================================
+# Promote or rollback version tags for ACTIONS and WORKFLOWS.
+# - Actions: component_path = e.g. platform/actions/my-action.
+# - Workflows: component_path = workflows/<name> (folder). On promote, copies
+#   workflows/<name>/* to .github/workflows/, then tags. Tag = only that workflow.
+# See README-platform-component-manager.md.
+# ACTIONS: Only actions/checkout@v4. Contents: write for tags and workflow publish.
+# =============================================================================
+
+name: Platform Component Manager
+
+on:
+  workflow_dispatch:
+    inputs:
+      component_path:
+        description: 'Path: platform/actions/my-action OR workflows/name OR platform/workflows/name'
+        required: true
+        type: string
+      mode:
+        description: 'Action'
+        required: true
+        type: choice
+        options:
+          - promote
+          - rollback
+      version:
+        description: 'Target Version (e.g., 1.2.0)'
+        required: true
+        type: string
+      tag_content:
+        description: 'Tag points to (monorepo = whole repo; subtree = only action code)'
+        required: false
+        type: choice
+        default: monorepo
+        options:
+          - monorepo
+          - subtree
+
+jobs:
+  manage-component:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # --- Official GitHub action only; fetch-depth 0 needed for tag history ---
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Workflow publish: if component_path is workflows/<name> or platform/workflows/<name>, copy to .github/workflows/ then tag.
+      - name: Publish workflow to .github/workflows (if workflows path)
+        run: |
+          PATH_NAME="${{ github.event.inputs.component_path }}"
+          if [ "${{ github.event.inputs.mode }}" != "promote" ]; then
+            echo "Skip publish step (rollback)."
+            exit 0
+          fi
+          case "$PATH_NAME" in
+            workflows/*|platform/workflows/*)
+              mkdir -p .github/workflows
+              if [ -d "$PATH_NAME" ]; then
+                for f in "$PATH_NAME"/*; do
+                  [ -e "$f" ] || continue
+                  [ -f "$f" ] || continue
+                  cp "$f" ".github/workflows/$(basename "$f")"
+                done
+              elif [ -f "$PATH_NAME" ]; then
+                cp "$PATH_NAME" ".github/workflows/$(basename "$PATH_NAME")"
+              else
+                echo "::error::Workflow path $PATH_NAME not found (use folder workflows/name/ or platform/workflows/name/ or file)."
+                exit 1
+              fi
+              git add .github/workflows/
+              if ! git diff --staged --quiet; then
+                git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" \
+                  commit -m "Publish workflow $PATH_NAME to .github/workflows"
+                git push origin HEAD
+              fi
+              echo "WORKFLOW_PUBLISHED=1" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "Not a workflow path; skip publish."
+              ;;
+          esac
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Promote: create FULL_TAG (monorepo at HEAD, or subtree = only component code). Rollback: move STABLE_TAG to existing FULL_TAG.
+      - name: Execute Tag Flip
+        run: |
+          PATH_NAME="${{ github.event.inputs.component_path }}"
+          VER="${{ github.event.inputs.version }}"
+          TAG_CONTENT="${{ github.event.inputs.tag_content || 'monorepo' }}"
+          MAJOR="v$(echo "$VER" | cut -d. -f1)"
+          FULL_TAG="${PATH_NAME}/${VER}"
+          STABLE_TAG="${PATH_NAME}/${MAJOR}"
+          SUBTREE_BRANCH="release/subtree-$(echo "$PATH_NAME" | tr '/' '-')-${VER}"
+
+          if [ "${{ github.event.inputs.mode }}" = "promote" ]; then
+            echo "Promoting $PATH_NAME to version $VER (tag_content=$TAG_CONTENT)..."
+            ORIG_REF=$(git rev-parse HEAD)
+
+            if [ "$TAG_CONTENT" = "subtree" ]; then
+              if [ ! -d "$PATH_NAME" ] && [ ! -f "$PATH_NAME" ]; then
+                echo "::error::Path $PATH_NAME not found (required for subtree)."
+                exit 1
+              fi
+
+              if [ "${PATH_NAME#workflows/}" != "$PATH_NAME" ] || [ "${PATH_NAME#platform/workflows/}" != "$PATH_NAME" ]; then
+                # Workflow subtree: tag contains only .github/workflows/<files we published>
+                git checkout --orphan "$SUBTREE_BRANCH"
+                git rm -rf .
+                if [ -d "$PATH_NAME" ]; then
+                  for f in "$PATH_NAME"/*; do
+                    [ -e "$f" ] || continue
+                    [ -f "$f" ] || continue
+                    WF_FILE=".github/workflows/$(basename "$f")"
+                    git checkout "$ORIG_REF" -- "$WF_FILE" 2>/dev/null || true
+                  done
+                else
+                  WF_FILE=".github/workflows/$(basename "$PATH_NAME")"
+                  git checkout "$ORIG_REF" -- "$WF_FILE" 2>/dev/null || true
+                fi
+                git add .
+                git commit -m "Release $PATH_NAME $VER (workflow subtree)"
+              else
+                # Action subtree: tag contains only PATH_NAME folder (path preserved)
+                git checkout --orphan "$SUBTREE_BRANCH"
+                git rm -rf .
+                git checkout "$ORIG_REF" -- "$PATH_NAME"
+                git add "$PATH_NAME"
+                git commit -m "Release $PATH_NAME $VER (subtree)"
+              fi
+
+              git tag "$FULL_TAG" -m "Release $PATH_NAME $VER (subtree)" "$SUBTREE_BRANCH"
+              git tag -f "$STABLE_TAG" -m "Stable $PATH_NAME $MAJOR" "$SUBTREE_BRANCH"
+              git push origin "$FULL_TAG"
+              git push origin "$STABLE_TAG" --force
+              git checkout -
+              git branch -D "$SUBTREE_BRANCH"
+              git push origin --delete "$SUBTREE_BRANCH" 2>/dev/null || true
+              echo "Subtree tag created: $FULL_TAG"
+            else
+              git tag "$FULL_TAG" -m "Release $PATH_NAME $VER"
+              git tag -f "$STABLE_TAG" -m "Stable $PATH_NAME $MAJOR"
+              git push origin "$FULL_TAG"
+              git push origin "$STABLE_TAG" --force
+            fi
+          else
+            echo "Rolling back $STABLE_TAG to point to $FULL_TAG..."
+            git tag -f "$STABLE_TAG" "$FULL_TAG"
+            git push origin "$STABLE_TAG" --force
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

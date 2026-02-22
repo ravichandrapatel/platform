@@ -39,7 +39,11 @@ Production deployment for [Actions Runner Controller](https://github.com/actions
 2. Edit **overlays/rosadev/scale-set-values.yaml** for `githubConfigUrl` and runner `image`.
 3. Apply: `kubectl apply -k addons/arc/overlays/rosadev/`
 
-The overlay includes SCC `github-arc`, ClusterRole, and RoleBinding. Optional: `oc policy add-role-to-user system:openshift:scc:github-arc -z arc-scale-set-gha-rs-no-permission -n arc-system`
+The overlay includes SCC `github-arc`, ClusterRole, and RoleBinding. The RoleBinding grants the SCC to the scale set's service account (`arc-scale-set-gha-rs-no-permission` by default). **If you see "fsGroup 123 not allowed" or "not allowed by the SCC"**, ensure the runner pod's service account is in **overlays/rosadev/rolebinding-scc.yaml** `subjects` (same name/namespace). Optional: `oc policy add-role-to-user system:openshift:scc:github-arc -z arc-scale-set-gha-rs-no-permission -n arc-system`
+
+**Dependency-check and rootless Podman:** The runner uses VFS storage and a custom SCC. Nested `podman run` (e.g. dependency-check) uses **`--cgroups=disabled`** so Podman does not create a child cgroup for the container; ROSA/unprivileged OpenShift blocks child cgroup creation (cgroups v2). The runner image sets `cgroups = "disabled"` in `~/.config/containers/containers.conf` by default. The runner container also uses `procMount: Unmasked` and capabilities SETUID/SETGID, SYS_ADMIN for newuidmap and proc mount. If you still see OCI permission denied, ensure the scale set and SCC are applied and runner pods were recreated.
+
+**FUSE / fuse-overlayfs:** The scale set pod template includes the annotation `io.kubernetes.cri-o.Devices: "/dev/fuse"` so rootless Podman can use fuse-overlayfs (avoids "fuse device not found" / "fuse overlays cannot mount"). On OpenShift 4.15+ this is supported; on older versions the cluster may need CRI-O `allowed_devices` configured. If you cannot get `/dev/fuse` (e.g. on plain Kubernetes), add to the runner container env: `CONTAINERS_STORAGE_DRIVER: vfs` — storage will be slower but no FUSE is required.
 
 ### Kubernetes dev
 

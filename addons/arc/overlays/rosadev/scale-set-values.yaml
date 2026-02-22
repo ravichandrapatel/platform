@@ -12,6 +12,10 @@ controllerServiceAccount:
   name: arc-controller
 
 template:
+  metadata:
+    # Expose /dev/fuse so rootless Podman can use fuse-overlayfs (avoids "fuse device not found").
+    annotations:
+      io.kubernetes.cri-o.Devices: "/dev/fuse"
   spec:
     securityContext:
       runAsNonRoot: true
@@ -37,10 +41,16 @@ template:
                 fieldPath: metadata.name
           - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
             value: "true"
+          # Avoid FUSE: use vfs storage so podman run works without /dev/fuse (slower but reliable).
+          - name: CONTAINERS_STORAGE_DRIVER
+            value: "vfs"
         securityContext:
           allowPrivilegeEscalation: true
+          # Unmasked /proc so crun can mount proc in nested containers (podman run); see podman#20453.
+          procMount: Unmasked
           capabilities:
             drop: [ALL]
+            add: [SETUID, SETGID, SYS_ADMIN]
           readOnlyRootFilesystem: false
           runAsNonRoot: true
           runAsUser: 1001

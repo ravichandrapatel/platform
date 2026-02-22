@@ -92,12 +92,21 @@ Workflow **Compliance** (`.github/workflows/compliance.yml`) runs on the first S
 
 ## Workflows
 
-Workflows that build or scan platform images live in **`.github/workflows/`** (GitHub only runs from there). They reference `platform/images/` and `platform/actions/` by path. Copies of the workflow files are kept under **`platform/workflows/`** for reference.
+Workflows that build or scan platform images live in **`.github/workflows/`** at the **repo root** (GitHub only runs workflows from there). They reference `platform/images/` and `platform/actions/` by path. Copies of workflow files are kept under **`platform/workflows/`** for reference only.
+
+**Reusable workflows:** GitHub only loads reusable workflows from **`.github/workflows/`**. You cannot put them in `platform/workflows/` and have other repos or workflows call them; they must live in `.github/workflows/` (e.g. `.github/workflows/compliance.yml`). Callers use `uses: org/repo/.github/workflows/compliance.yml@ref`.
 
 | Workflow | Purpose |
 |----------|--------|
 | Dependency-Check UBI9 (nightly) | Build and push dependency-check-ubi9 image to GHCR |
 | Compliance | First Sunday of month + manual: Trivy config+fs per image (matrix, max 4); build+push only if Critical=0; updates compliance table in README |
+
+---
+
+## Releasing tagged versions
+
+- **Reusable actions:** Use the **Platform Component Manager** workflow (Actions → Platform Component Manager → Run workflow). Set `component_path` to the action folder (e.g. `platform/actions/dependency-check-ubi9`), choose **promote** or **rollback**, and the **version** (e.g. `1.2.0`). This creates/updates tags like `platform/actions/dependency-check-ubi9/1.2.0` and `platform/actions/dependency-check-ubi9/v1`. See [README-platform-component-manager.md](README-platform-component-manager.md).
+- **Reusable workflows:** They live in `.github/workflows/`. To release a tagged version, create a tag that includes the desired commit (e.g. repo tag `v1.0.0` or use the component manager with a path like `.github/workflows` if you version that folder). Callers reference the workflow with that ref: `uses: org/repo/.github/workflows/name.yml@v1.0.0`.
 
 ---
 
