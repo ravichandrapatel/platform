@@ -1,14 +1,15 @@
 # Janitor Bot Action
 
-Scan or cleanup **stale branches** (and optionally PRs) for **one repo**, **multiple repos**, **entire org**, or **repos with a topic (tag)**. Configuration is **100% environment variables**—no JSON config file. Ideal for use with `workflow_dispatch` so you can change scope and thresholds from the "Run workflow" UI.
+Scan or cleanup **stale branches**, **pull requests**, **artifacts**, and **packages** for **one repo**, **multiple repos**, **entire org**, or **repos with a topic (tag)**. Configuration is **100% environment variables**—no JSON config file. You can **enable only what you need** (e.g. only artifacts, or only PRs) and use **name/pattern filters** for each. Ideal for use with `workflow_dispatch` so you can change scope and thresholds from the "Run workflow" UI.
 
 ## Features
 
 - **Scope**: Run against a single repo, a list of repos, all repos in an org, or all org repos that have a given GitHub **topic** (tag).
-- **Branch scan**: Finds branches older than a configurable number of days, with optional regex exclusion and "skip if open PR" protection. **Protected branches are never touched** (skipped in both scan and cleanup).
-- **Config via env**: All settings come from environment variables (e.g. `SCOPE`, `REPO`, `REPOS`, `REPO_TOPIC`, `BRANCH_STALE_DAYS`), which you map from workflow inputs in YAML.
-- **Markdown report**: Writes `janitor_report.md` with **explicit thresholds and scope** used for the run and a table of stale branches (and later PRs/packages).
-- **API throttling**: Uses a `RateLimiter` and `GitHubApiClient` that read `X-RateLimit-Remaining` / `X-RateLimit-Reset` and, on 403/429, retry with backoff (including `Retry-After`). Repos are processed in a batch-friendly way with an optional delay between repos (`BATCH_DELAY_SECONDS`).
+- **Four cleanup types**: **Branches** (scan only; protected branches never touched), **PRs** (close stale open PRs), **Artifacts** (delete old workflow artifacts), **Packages** (delete old package versions, org-level). Enable any combination via `cleanup_branches`, `cleanup_prs`, `cleanup_artifacts`, `cleanup_packages`.
+- **Pattern per type**: Each type can be restricted by a **glob pattern**—e.g. only branches matching `feature/*`, only artifacts named `plan-*`, only PRs from `release-*`, only packages named `my-app-*`.
+- **Config via env**: All settings come from environment variables, which you map from workflow inputs in YAML.
+- **Markdown report**: Writes `janitor_report.md` with thresholds and tables for branches, PRs, artifacts, and packages.
+- **API throttling**: Rate-limit awareness and retry with backoff; optional delay between repos (`BATCH_DELAY_SECONDS`).
 
 ## Scope (what to scan)
 
@@ -21,8 +22,8 @@ Scan or cleanup **stale branches** (and optionally PRs) for **one repo**, **mult
 
 ## Requirements
 
-- **Python 3.9+** (stdlib only: `os`, `json`, `urllib.request`, `re`, `argparse`, `datetime`).
-- **GitHub PAT**: A token with `repo` (and `read:org` if scanning an org) scope; store it as a secret (e.g. `JANITOR_BOT_PAT`).
+- **Python 3.9+** (stdlib only: `os`, `json`, `urllib.request`, `re`, `argparse`, `datetime`, `fnmatch`).
+- **GitHub PAT**: A token with `repo` (and `read:org` if scanning an org). For **artifact** cleanup: repo is enough. For **package** cleanup (org-level): add `read:packages` and `delete:packages`; store as a secret (e.g. `JANITOR_BOT_PAT`).
 
 ## Inputs (action.yml) → Environment variables (janitor.py)
 
@@ -39,15 +40,110 @@ The action passes its inputs into the script as environment variables. You can a
 | `repo_topic`             | `REPO_TOPIC` or `TOPIC`| string | —                            | GitHub topic (tag). Used when `scope=topic`. |
 | `branch_stale_days`      | `BRANCH_STALE_DAYS`    | int    | `45`                         | Branches older than this (days) are stale. |
 | `branch_exclude_regex`   | `BRANCH_EXCLUDE_REGEX` | string | `^(main\|master\|develop)$` | Regex for branch names to never touch. |
+| `branch_include_pattern` | `BRANCH_INCLUDE_PATTERN` | string | `*` | **Glob**: only consider branches matching this (e.g. `feature/*`). `*` = all. |
 | —                        | *(built-in)*           | —      | —                            | **Protected branches** are always skipped (never touched). |
 | `branch_protect_pr`      | `BRANCH_PROTECT_PR`    | bool   | `true`                       | Skip branches that have an open PR. |
 | `pr_stale_days`          | `PR_STALE_DAYS`        | int    | `30`                         | PRs older than this (days) are stale. |
-| `pr_exclude_labels`      | `PR_EXCLUDE_LABELS`    | string | `pinned`                     | Comma-separated labels; PRs with any are excluded. |
+| `pr_exclude_labels`     | `PR_EXCLUDE_LABELS`    | string | `pinned`                     | Comma-separated labels; PRs with any are excluded. |
 | `pkg_keep_count`         | `PKG_KEEP_COUNT`       | int    | `5`                          | Number of package versions to keep. |
 | `dry_run`                | `DRY_RUN`              | bool   | `true`                       | If true, no destructive actions. |
 | `batch_delay_seconds`    | `BATCH_DELAY_SECONDS`  | float  | `0`                          | Optional delay between repos to reduce API burst. |
+| `cleanup_branches`       | `CLEANUP_BRANCHES`     | bool   | `true`                       | When true, run branch scan (report only). |
+| `cleanup_artifacts`      | `CLEANUP_ARTIFACTS`    | bool   | `false`                      | When true, run artifact scan/cleanup (filtered by `artifact_name_pattern`). |
+| `artifact_name_pattern`  | `ARTIFACT_NAME_PATTERN`| string | `*`                          | **Glob** for artifact names (e.g. `plan-*`). `*` = all. |
+| `artifact_stale_days`    | `ARTIFACT_STALE_DAYS`  | int    | `30`                         | Artifacts older than this (days) are stale. |
+| `artifact_keep_count`    | `ARTIFACT_KEEP_COUNT`  | int    | `0`                          | Keep at least this many most recent matching artifacts (0 = use only stale_days). |
+| `cleanup_prs`            | `CLEANUP_PRS`          | bool   | `false`                      | When true, run PR scan/cleanup (close stale PRs). |
+| `pr_head_ref_pattern`    | `PR_HEAD_REF_PATTERN`  | string | `*`                          | **Glob** for PR head ref (branch) to consider (e.g. `feature/*`). `*` = all. |
+| `cleanup_packages`       | `CLEANUP_PACKAGES`     | bool   | `false`                      | When true, run package version cleanup (org-level). |
+| `pkg_name_pattern`       | `PKG_NAME_PATTERN`     | string | `*`                          | **Glob** for package names (e.g. `my-app-*`). `*` = all. |
+| `pkg_type`               | `PKG_TYPE`             | string | `container`                   | Package type for org packages (`container`, `npm`, etc.). |
 
-The script converts string inputs to the correct types (e.g. `'45'` → `45`) and compiles `BRANCH_EXCLUDE_REGEX` with `re.compile()` for performance.
+The script converts string inputs to the correct types and compiles `BRANCH_EXCLUDE_REGEX` for performance.
+
+## Enable only what you need (branches, PRs, artifacts, packages)
+
+You can run **only one** cleanup type or **any combination**. Set the corresponding `cleanup_*` flags and use the **pattern** for that type to restrict by name/key.
+
+| Type      | Enable with           | Pattern input              | Description |
+|-----------|-----------------------|----------------------------|-------------|
+| Branches  | `cleanup_branches: true`  | `branch_include_pattern`   | Only branches matching glob (e.g. `feature/*`). Report only (no branch delete). |
+| PRs       | `cleanup_prs: true`       | `pr_head_ref_pattern`      | Only PRs whose head ref matches (e.g. `release-*`). Closes stale PRs. |
+| Artifacts | `cleanup_artifacts: true` | `artifact_name_pattern`    | Only artifacts whose name matches (e.g. `plan-*`). Deletes old artifacts. |
+| Packages  | `cleanup_packages: true`  | `pkg_name_pattern`         | Only packages whose name matches (e.g. `my-app-*`). Deletes old versions (org-level). |
+
+**Example: only artifacts** (pattern `plan-*`), keep latest 5, delete older than 14 days:
+
+```yaml
+- uses: ./.github/actions/janitor-bot
+  with:
+    mode: cleanup
+    gh_token: ${{ secrets.JANITOR_BOT_PAT }}
+    scope: repo
+    repo: ${{ github.repository }}
+    cleanup_branches: false
+    cleanup_prs: false
+    cleanup_packages: false
+    cleanup_artifacts: true
+    artifact_name_pattern: 'plan-*'
+    artifact_stale_days: 14
+    artifact_keep_count: 5
+    dry_run: false
+```
+
+**Example: only PRs** (head ref pattern `feature/*`), close PRs older than 30 days:
+
+```yaml
+- uses: ./.github/actions/janitor-bot
+  with:
+    mode: cleanup
+    gh_token: ${{ secrets.JANITOR_BOT_PAT }}
+    scope: repo
+    repo: ${{ github.repository }}
+    cleanup_branches: false
+    cleanup_artifacts: false
+    cleanup_packages: false
+    cleanup_prs: true
+    pr_head_ref_pattern: 'feature/*'
+    pr_stale_days: 30
+    dry_run: false
+```
+
+**Example: only branches** (include pattern `release-*`), scan and report:
+
+```yaml
+- uses: ./.github/actions/janitor-bot
+  with:
+    mode: scan
+    gh_token: ${{ secrets.JANITOR_BOT_PAT }}
+    scope: repo
+    repo: ${{ github.repository }}
+    cleanup_branches: true
+    cleanup_artifacts: false
+    cleanup_prs: false
+    cleanup_packages: false
+    branch_include_pattern: 'release-*'
+```
+
+**Example: only packages** (org-level, name pattern `my-service-*`), keep 5 versions:
+
+```yaml
+- uses: ./.github/actions/janitor-bot
+  with:
+    mode: cleanup
+    gh_token: ${{ secrets.JANITOR_BOT_PAT }}
+    scope: org
+    org_name: my-org
+    cleanup_branches: false
+    cleanup_artifacts: false
+    cleanup_prs: false
+    cleanup_packages: true
+    pkg_name_pattern: 'my-service-*'
+    pkg_type: container
+    dry_run: false
+```
+
+Use `*` for any pattern to mean "all" for that type. You can enable two or more types in one run (e.g. artifacts + PRs) and set each pattern independently.
 
 ## Usage
 
@@ -201,8 +297,11 @@ Defaults apply when a variable is missing (e.g. scope=org, 45 for branches, 30 f
 
 `janitor_report.md` includes:
 
-- **Thresholds used**: Scope, branch stale days, branch exclude regex, PR stale days, PR exclude labels, package keep count, dry run.
-- **Stale branches**: Table of repo (owner/repo), branch, owner, days stale.
+- **Thresholds used**: Scope, all cleanup_* flags, branch/PR/package/artifact patterns and settings, dry run.
+- **Stale branches**: Table of repo, branch, owner, days stale (when `cleanup_branches` is enabled).
+- **Artifacts**: Table of repo, artifact name, ID, size, days stale (when `cleanup_artifacts` is enabled).
+- **Pull requests**: Table of repo, PR number, title, head ref, days stale (when `cleanup_prs` is enabled).
+- **Packages**: Table of org, package type, name, version ID, days stale (when `cleanup_packages` is enabled).
 
 No JSON config file is required; everything is driven by environment variables (and in GitHub Actions, by mapping workflow inputs to those env vars).
 

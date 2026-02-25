@@ -36,6 +36,10 @@ inputs:
     description: 'Regex for branch names to never touch (e.g. main, master, develop)'
     required: false
     default: '^(main|master|develop)$'
+  branch_include_pattern:
+    description: 'Glob pattern: only consider branches matching this (e.g. feature/*). Use * for all.'
+    required: false
+    default: '*'
   branch_protect_pr:
     description: 'Skip branches that have an open PR'
     required: false
@@ -60,6 +64,46 @@ inputs:
     description: 'Optional delay in seconds between repos to reduce API burst (throttling)'
     required: false
     default: '0'
+  cleanup_branches:
+    description: 'When true, run branch scan (and report). Set false to run only artifacts (with cleanup_artifacts=true).'
+    required: false
+    default: 'true'
+  cleanup_artifacts:
+    description: 'When true, run artifact scan/cleanup (filtered by artifact_name_pattern). Enable only this for artifacts-only cleanup.'
+    required: false
+    default: 'false'
+  artifact_name_pattern:
+    description: 'Glob pattern for artifact names to consider (e.g. plan-*, build-*). Use * for all. Only used when cleanup_artifacts is true.'
+    required: false
+    default: '*'
+  artifact_stale_days:
+    description: 'Artifacts older than this many days are considered stale and reported/deleted'
+    required: false
+    default: '30'
+  artifact_keep_count:
+    description: 'Keep at least this many most recent artifacts matching the pattern (0 = use only stale_days)'
+    required: false
+    default: '0'
+  cleanup_prs:
+    description: 'When true, run PR scan/cleanup (close stale PRs). Filter by pr_head_ref_pattern.'
+    required: false
+    default: 'false'
+  pr_head_ref_pattern:
+    description: 'Glob pattern for PR head ref (branch) to consider (e.g. feature/*). Use * for all.'
+    required: false
+    default: '*'
+  cleanup_packages:
+    description: 'When true, run package version cleanup (org-level). Filter by pkg_name_pattern.'
+    required: false
+    default: 'false'
+  pkg_name_pattern:
+    description: 'Glob pattern for package names to consider (e.g. my-app-*). Use * for all.'
+    required: false
+    default: '*'
+  pkg_type:
+    description: 'Package type for org packages (e.g. container, npm)'
+    required: false
+    default: 'container'
 outputs:
   report_path:
     description: 'Path to the generated Markdown report (scan mode)'
@@ -82,9 +126,20 @@ runs:
         REPO_TOPIC: ${{ inputs.repo_topic }}
         BRANCH_STALE_DAYS: ${{ inputs.branch_stale_days }}
         BRANCH_EXCLUDE_REGEX: ${{ inputs.branch_exclude_regex }}
+        BRANCH_INCLUDE_PATTERN: ${{ inputs.branch_include_pattern }}
         BRANCH_PROTECT_PR: ${{ inputs.branch_protect_pr }}
         PR_STALE_DAYS: ${{ inputs.pr_stale_days }}
         PR_EXCLUDE_LABELS: ${{ inputs.pr_exclude_labels }}
         PKG_KEEP_COUNT: ${{ inputs.pkg_keep_count }}
         DRY_RUN: ${{ inputs.dry_run }}
         BATCH_DELAY_SECONDS: ${{ inputs.batch_delay_seconds }}
+        CLEANUP_BRANCHES: ${{ inputs.cleanup_branches }}
+        CLEANUP_ARTIFACTS: ${{ inputs.cleanup_artifacts }}
+        ARTIFACT_NAME_PATTERN: ${{ inputs.artifact_name_pattern }}
+        ARTIFACT_STALE_DAYS: ${{ inputs.artifact_stale_days }}
+        ARTIFACT_KEEP_COUNT: ${{ inputs.artifact_keep_count }}
+        CLEANUP_PRS: ${{ inputs.cleanup_prs }}
+        PR_HEAD_REF_PATTERN: ${{ inputs.pr_head_ref_pattern }}
+        CLEANUP_PACKAGES: ${{ inputs.cleanup_packages }}
+        PKG_NAME_PATTERN: ${{ inputs.pkg_name_pattern }}
+        PKG_TYPE: ${{ inputs.pkg_type }}

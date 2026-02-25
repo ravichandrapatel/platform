@@ -1,0 +1,2 @@
+# Janitor Bot: stdlib only (argparse, fnmatch, json, os, re, time, urllib, datetime).
+# No external dependencies required.
