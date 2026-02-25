@@ -1,0 +1,493 @@
+# =============================================================================
+# Terraform
+# =============================================================================
+# Triggers and flow:
+# - Feature branch push: does NOT auto-trigger. Use "Run workflow" (workflow_dispatch)
+#   to run plan, fix failures, then open PR.
+# - Pull request to main: auto-triggers plan through OPA (no apply). Require this
+#   workflow as a status check on main so PR can merge only when all jobs pass.
+# - Push to main: only via PR merge (no direct push). Auto-triggers full pipeline through apply.
+#
+# Stages: 1 detect-changes → 2 checks → 3 preprocessing → 4 plan → 5 plan-summary → 6 OPA → 7 apply (main only).
+# Naming: .github/NAMING.md. ACTIONS: checkout, create-github-app-token, setup-terraform, configure-aws-credentials, git-path-filter.
+# =============================================================================
+
+name: Terraform
+
+env:
+  TF_WORKING_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.working_directory || '.' }}
+  TF_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.terraform_version || '1.9.0' }}
+  TF_EXEC_IAM_ROLE: ${{ github.event_name == 'workflow_dispatch' && inputs.terraform_exec_iam_role || '' }}
+  TF_EXEC_ROLE_REGION: ${{ github.event_name == 'workflow_dispatch' && inputs.terraform_exec_role_region || 'us-east-1' }}
+  TF_OPA_POLICY_PATH: ${{ github.event_name == 'workflow_dispatch' && inputs.opa_policy_path || 'platform/policies/terraform' }}
+
+on:
+  # Main only via PR merge (no direct push): full pipeline through apply.
+  push:
+    branches: [main]
+    paths:
+      - '**/*.tfvars'
+  # PR to main: runs plan + OPA; require this workflow as branch protection check.
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.tfvars'
+  # Manual run (e.g. on feature branch to trigger plan and fix before PR).
+  workflow_dispatch:
+    inputs:
+      working_directory:
+        description: 'Terraform root (e.g. . or terraform/ or environments/dev)'
+        required: false
+        default: '.'
+      terraform_version:
+        description: 'Terraform version (e.g. 1.9.0)'
+        required: false
+        default: '1.9.0'
+      terraform_exec_iam_role:
+        description: 'IAM role ARN for Terraform execution (OIDC assume-role)'
+        required: false
+      terraform_exec_role_region:
+        description: 'AWS region for Terraform exec role'
+        required: false
+        default: 'us-east-1'
+      opa_policy_path:
+        description: 'Path to OPA/Rego policy bundle for plan evaluation (e.g. platform/policies/terraform)'
+        required: false
+        default: 'platform/policies/terraform'
+
+jobs:
+  # ===========================================================================
+  # STAGE 1: Detect changes
+  # ===========================================================================
+  # Uses in-repo git-path-filter to find which *.tfvars files changed between
+  # source ref (e.g. PR head or current branch) and base ref (e.g. main).
+  # Outputs changes_json with key "tfvars" (has_changes, files[]). Downstream
+  # stages run only when tfvars.has_changes is true (or on workflow_dispatch).
+  # ===========================================================================
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.changes.outputs.changes }}
+      changes_json: ${{ steps.changes.outputs.changes_json }}
+    steps:
+      # Step 1.1: Checkout repo with full history for git diff
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Step 1.2: Set source/base refs for detection (dispatch vs PR vs push)
+      - name: Set refs for detection
+        id: refs
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "source=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "base=${{ github.event.repository.default_branch }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "source=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+            echo "base=${{ github.base_ref }}" >> $GITHUB_OUTPUT
+          else
+            echo "source=${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "base=${{ github.event.before || github.event.repository.default_branch }}" >> $GITHUB_OUTPUT
+          fi
+
+      # Step 1.3: Run git-path-filter; output changes_json.tfvars (has_changes, files)
+      - name: Detect changes (git-path-filter)
+        id: changes
+        uses: ./platform/actions/git-path-filter
+        with:
+          source_branch: ${{ steps.refs.outputs.source }}
+          base_ref_branch: ${{ steps.refs.outputs.base }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          pattern_filter: |
+            tfvars:
+              - '**/*.tfvars'
+
+  # ===========================================================================
+  # STAGE 2: Terraform checks
+  # ===========================================================================
+  # Runs terraform init -backend=false, validate, and fmt -check. No cloud
+  # backend or credentials needed. Ensures config is valid and formatted before
+  # plan. Runs when tfvars changed (or on workflow_dispatch).
+  # ===========================================================================
+  terraform-checks:
+    runs-on: ubuntu-latest
+    needs: [detect-changes]
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (needs.detect-changes.outputs.changes_json != '' &&
+       fromJSON(needs.detect-changes.outputs.changes_json).tfvars.has_changes)
+    steps:
+      # Step 2.1: Checkout
+      - uses: actions/checkout@v4
+
+      # Step 2.2: Create GitHub App token for private Terraform modules (when vars.TF_MODULES_APP_ID set)
+      - name: Create GitHub App token (private modules)
+        id: app-token
+        if: vars.TF_MODULES_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.TF_MODULES_APP_ID }}
+          private-key: ${{ secrets.TF_MODULES_APP_PRIVATE_KEY }}
+          owner: ${{ vars.TF_MODULES_APP_OWNER || github.repository_owner }}
+
+      # Step 2.3: Configure Git so terraform init can clone private module repos
+      - name: Configure Git for private Terraform modules
+        if: vars.TF_MODULES_APP_ID != '' && steps.app-token.outputs.token != ''
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+
+      # Step 2.4: Setup Terraform (version from env TF_VERSION)
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Step 2.5: Init with backend disabled (no state/credentials)
+      - name: Terraform init (backend disabled)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false -backend=false
+
+      # Step 2.6: Validate configuration
+      - name: Terraform validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate -no-color
+
+      # Step 2.7: Check formatting (fails if not fmt'd)
+      - name: Terraform fmt (check)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -check -recursive -diff
+
+  # ===========================================================================
+  # STAGE 3: Preprocessing
+  # ===========================================================================
+  # Builds the plan matrix from changed .tfvars: workspace name = basename
+  # without .tfvars, tfvars_file = full path. Caps at 10 workspaces per run.
+  # Outputs matrix for terraform-plan and terraform-apply.
+  # ===========================================================================
+  preprocessing:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, terraform-checks]
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (needs.detect-changes.outputs.changes_json != '' &&
+       fromJSON(needs.detect-changes.outputs.changes_json).tfvars.has_changes)
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      # Step 3.1: Build matrix [{workspace, tfvars_file}, ...], max 10
+      - name: Build plan matrix (max 10 workspaces per run)
+        id: matrix
+        run: |
+          CHANGES_JSON='${{ needs.detect-changes.outputs.changes_json }}'
+          MAX=10
+          MATRIX=$(echo "$CHANGES_JSON" | jq -c --argjson max $MAX '
+            ((.tfvars.files // []) |
+              map({workspace: (split("/") | last | rtrimstr(".tfvars")), tfvars_file: .}) |
+              unique_by(.workspace) |
+              .[0:$max])
+          ')
+          LEN=$(echo "$MATRIX" | jq 'length')
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "Plan: $LEN workspace(s) this run (max $MAX per run)"
+
+  # ===========================================================================
+  # STAGE 4: Terraform plan
+  # ===========================================================================
+  # One matrix job per workspace (max 10). Each job: init, workspace select/new,
+  # plan with var-file, then emit plan .json (OPA) and .binary (apply), capture
+  # plan.txt, display summary to job summary, upload artifact plan-<workspace>.
+  # fail-fast: false so one failure does not cancel others; plan-summary lists successes.
+  # ===========================================================================
+  terraform-plan:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, preprocessing]
+    if: needs.preprocessing.outputs.matrix != '[]' && needs.preprocessing.outputs.matrix != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.preprocessing.outputs.matrix) }}
+    steps:
+      # Step 4.1: Checkout
+      - uses: actions/checkout@v4
+
+      # Step 4.2: Create GitHub App token for private Terraform modules (when vars.TF_MODULES_APP_ID set)
+      - name: Create GitHub App token (private modules)
+        id: app-token
+        if: vars.TF_MODULES_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.TF_MODULES_APP_ID }}
+          private-key: ${{ secrets.TF_MODULES_APP_PRIVATE_KEY }}
+          owner: ${{ vars.TF_MODULES_APP_OWNER || github.repository_owner }}
+
+      # Step 4.3: Configure Git so terraform init can clone private module repos
+      - name: Configure Git for private Terraform modules
+        if: vars.TF_MODULES_APP_ID != '' && steps.app-token.outputs.token != ''
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+
+      # Step 4.4: Configure AWS credentials via OIDC (if TF_EXEC_IAM_ROLE set)
+      - name: Configure AWS credentials (OIDC)
+        if: env.TF_EXEC_IAM_ROLE != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.TF_EXEC_IAM_ROLE }}
+          aws-region: ${{ env.TF_EXEC_ROLE_REGION }}
+
+      # Step 4.5: Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Step 4.6: Init with backend (for plan/state)
+      - name: Terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false
+
+      # Step 4.7: Select or create workspace; run plan with var-file (path resolved for TF_WORKING_DIR)
+      - name: Terraform plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          workspace='${{ matrix.workspace }}'
+          tfvars_file='${{ matrix.tfvars_file }}'
+          # Resolve var-file path: tfvars_file is from repo root; step runs in TF_WORKING_DIR
+          if [ "${{ env.TF_WORKING_DIR }}" = "." ]; then
+            var_file_path="$tfvars_file"
+          else
+            prefix=$(echo "${{ env.TF_WORKING_DIR }}" | sed 's|[^/]*|..|g')
+            var_file_path="${prefix}/$tfvars_file"
+          fi
+          if terraform workspace select "$workspace" 2>/dev/null; then
+            echo "Using existing workspace: $workspace"
+          else
+            terraform workspace new "$workspace"
+          fi
+          terraform plan -input=false -no-color -out=tfplan -var-file="$var_file_path"
+
+      # Step 4.8: Generate plan-<workspace>.json and .binary for OPA and apply
+      - name: Generate plan JSON and binary for OPA/apply
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          workspace='${{ matrix.workspace }}'
+          terraform show -json tfplan > plan-"$workspace".json
+          cp tfplan plan-"$workspace".binary
+          mkdir -p "$GITHUB_WORKSPACE/plan-artifacts"
+          cp plan-"$workspace".json plan-"$workspace".binary "$GITHUB_WORKSPACE/plan-artifacts/"
+
+      # Step 4.9: Capture human-readable plan for summary
+      - name: Capture plan output
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform show -no-color tfplan > plan.txt
+
+      # Step 4.10: Build markdown from plan.txt and append to GITHUB_STEP_SUMMARY
+      - name: Display plan summary
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          [ -f plan.txt ] || { echo "::warning::plan.txt not found, skipping summary"; exit 0; }
+          {
+            awk '/No changes. Your infrastructure matches the configuration./ {
+              print "## " $0
+              print "Terraform has compared your real infrastructure against your configuration and found no differences, so no changes are needed."
+              exit
+            }' plan.txt
+            awk '/Terraform will perform the following actions:/ {
+              print "## Terraform will perform the following actions:"
+              print "| Action | Resource |"
+              print "|--------|----------|"
+              exit
+            }' plan.txt
+            awk '/Terraform used the selected/{ next } /will be/ || /must be/ { print "|" $5 "|" $2 "|"; next } /Plan:/ { print "## " $0; next }' plan.txt \
+              | sed -e 's/created/:white_check_mark: create/' -e 's/destroyed/:bangbang: destroy/' -e 's/replaced/:recycle: replace/'
+          } > plan.md
+          cat plan.md >> $GITHUB_STEP_SUMMARY
+
+      # Step 4.11: Upload artifact plan-<workspace> (.json + .binary)
+      - name: Upload plan artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-${{ matrix.workspace }}
+          path: plan-artifacts
+
+  # ===========================================================================
+  # STAGE 5: Plan summary
+  # ===========================================================================
+  # Downloads all plan-* artifacts, writes a combined markdown table (workspace |
+  # .json | .binary), appends to GITHUB_STEP_SUMMARY, uploads plan-summary artifact.
+  # Runs even when some plan jobs failed; then shows count of successful plans.
+  # ===========================================================================
+  plan-summary:
+    runs-on: ubuntu-latest
+    needs: [terraform-plan]
+    if: always() && (needs.terraform-plan.result == 'success' || needs.terraform-plan.result == 'failure')
+    steps:
+      # Step 5.1: Download all plan-* artifacts into one directory
+      - name: Download all plan artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plan-*
+          merge-multiple: true
+
+      # Step 5.2: Write plan-summary.md (table + note on failures if any)
+      - name: Write plan summary
+        run: |
+          echo "# Terraform plan summary" > plan-summary.md
+          echo "" >> plan-summary.md
+          count=0
+          for f in plan-*.json; do [ -f "$f" ] && count=$((count+1)); done
+          if [ "${{ needs.terraform-plan.result }}" = "failure" ]; then
+            echo "> **Note:** One or more plan jobs failed. Table below lists **$count** workspace(s) that planned successfully." >> plan-summary.md
+            echo "" >> plan-summary.md
+          fi
+          echo "| Workspace | plan (OPA) | plan (apply) |" >> plan-summary.md
+          echo "|-------------------|------------|--------------|" >> plan-summary.md
+          for f in plan-*.json; do
+            [ -f "$f" ] || continue
+            base="${f%.json}"
+            base="${base#plan-}"
+            echo "| $base | \`${base}.json\` | \`${base}.binary\` |" >> plan-summary.md
+          done
+          echo "" >> plan-summary.md
+          echo "Use \`.json\` files for OPA stage; use \`.binary\` files for apply stage (\`terraform apply plan-<workspace>.binary\`)." >> plan-summary.md
+          cat plan-summary.md
+          cat plan-summary.md >> $GITHUB_STEP_SUMMARY
+
+      # Step 5.3: Upload plan-summary artifact
+      - name: Upload plan summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-summary
+          path: plan-summary.md
+
+  # ===========================================================================
+  # STAGE 6: OPA
+  # ===========================================================================
+  # Evaluates each plan-*.json against Rego policies (TF_OPA_POLICY_PATH).
+  # Queries data.terraform.plan.allow; job fails if any plan is denied. Runs only
+  # when all terraform-plan jobs succeeded.
+  # ===========================================================================
+  opa:
+    runs-on: ubuntu-latest
+    needs: [terraform-plan]
+    if: always() && needs.terraform-plan.result == 'success'
+    steps:
+      # Step 6.1: Checkout (for policy path)
+      - uses: actions/checkout@v4
+
+      # Step 6.2: Download all plan-* artifacts (merge to get plan-*.json)
+      - name: Download plan artifacts (.json for OPA)
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plan-*
+          merge-multiple: true
+
+      # Step 6.3: Install OPA CLI
+      - name: Install OPA
+        run: |
+          OPA_VER="v0.62.0"
+          curl -sL "https://github.com/open-policy-agent/opa/releases/download/${OPA_VER}/opa_linux_amd64" -o opa
+          chmod +x opa
+          sudo mv opa /usr/local/bin/
+          opa version
+
+      # Step 6.4: Eval each plan-*.json with policy; fail if allow != true
+      - name: OPA eval (plan JSON vs policy)
+        run: |
+          POLICY_PATH="${{ env.TF_OPA_POLICY_PATH }}"
+          if [ ! -d "$POLICY_PATH" ]; then
+            echo "::error::OPA policy path not found: $POLICY_PATH"
+            exit 1
+          fi
+          failed=0
+          for f in plan-*.json; do
+            [ -f "$f" ] || continue
+            echo "--- OPA: $f"
+            result=$(opa eval -i "$f" -d "$POLICY_PATH" "data.terraform.plan.allow" --format raw 2>&1) || true
+            echo "$result"
+            if [ "$result" != "true" ]; then
+              echo "::error::OPA denied plan: $f (allow=$result)"
+              failed=1
+            fi
+          done
+          [ "$failed" -eq 0 ] || exit 1
+
+  # ===========================================================================
+  # STAGE 7: Apply
+  # ===========================================================================
+  # Runs only on ref main (e.g. after PR merge). One matrix job per workspace:
+  # download plan-<workspace> artifact, init, workspace select, apply -auto-approve
+  # using the plan .binary. fail-fast: false so one apply failure does not cancel others.
+  # ===========================================================================
+  terraform-apply:
+    runs-on: ubuntu-latest
+    needs: [preprocessing, terraform-plan, opa]
+    if: github.ref == 'refs/heads/main' && needs.opa.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.preprocessing.outputs.matrix) }}
+    steps:
+      # Step 7.1: Checkout
+      - uses: actions/checkout@v4
+
+      # Step 7.2: Create GitHub App token for private Terraform modules (when vars.TF_MODULES_APP_ID set)
+      - name: Create GitHub App token (private modules)
+        id: app-token
+        if: vars.TF_MODULES_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.TF_MODULES_APP_ID }}
+          private-key: ${{ secrets.TF_MODULES_APP_PRIVATE_KEY }}
+          owner: ${{ vars.TF_MODULES_APP_OWNER || github.repository_owner }}
+
+      # Step 7.3: Configure Git so terraform init can clone private module repos
+      - name: Configure Git for private Terraform modules
+        if: vars.TF_MODULES_APP_ID != '' && steps.app-token.outputs.token != ''
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+
+      # Step 7.4: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials (OIDC)
+        if: env.TF_EXEC_IAM_ROLE != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.TF_EXEC_IAM_ROLE }}
+          aws-region: ${{ env.TF_EXEC_ROLE_REGION }}
+
+      # Step 7.5: Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Step 7.6: Download plan artifact for this workspace
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plan-${{ matrix.workspace }}
+
+      # Step 7.7: Init with backend
+      - name: Terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false
+
+      # Step 7.8: Select workspace
+      - name: Terraform workspace select
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform workspace select ${{ matrix.workspace }}
+
+      # Step 7.9: Apply using plan binary
+      - name: Terraform apply
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          PLAN_FILE="$GITHUB_WORKSPACE/plan-${{ matrix.workspace }}/plan-${{ matrix.workspace }}.binary"
+          terraform apply -input=false -auto-approve "$PLAN_FILE"

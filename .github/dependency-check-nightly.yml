@@ -1,13 +1,13 @@
 # =============================================================================
-# Dependency-Check UBI9 (nightly) – platform copy
+# OWASP Dependency-Check (nightly) – platform copy
 # =============================================================================
 # Same as root .github/workflows/dependency-check-nightly.yml. Builds the
-# Dependency-Check UBI9 image and pushes to registry (default GHCR).
+# owasp-dependency-check image and pushes to registry (default GHCR).
 #
 # ACTIONS: Only actions/checkout@v4. No third-party actions; no docker/*.
 # =============================================================================
 
-name: Dependency-Check UBI9 (nightly)
+name: OWASP Dependency-Check (nightly)
 
 on:
   schedule:
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: dependency-check-ubi9
+  IMAGE_NAME: owasp-dependency-check
   REGISTRY: ghcr.io
   REPOSITORY: ${{ github.repository }}
 
@@ -55,9 +55,9 @@ jobs:
           RT="${{ steps.runtime.outputs.runtime }}"
           $RT build \
             --tag ${{ env.IMAGE_NAME }}:latest \
-            --file platform/images/dependency-check-ubi9/Containerfile \
+            --file platform/images/owasp-dependency-check/Containerfile \
             --build-arg NVD_API_KEY="${{ secrets.NVD_API_KEY }}" \
-            platform/images/dependency-check-ubi9
+            platform/images/owasp-dependency-check
 
       - name: Log in to registry
         run: |

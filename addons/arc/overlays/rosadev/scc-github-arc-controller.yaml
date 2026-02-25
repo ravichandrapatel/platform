@@ -1,0 +1,52 @@
+# SCC for the ARC controller pod (runAsUser 1000, runAsGroup/fsGroup 123).
+# Without this, the default SCC (e.g. restricted) may reject fsGroup 123 or runAsGroup 123.
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: github-arc-controller
+  annotations:
+    kubernetes.io/description: "ARC controller; non-root uid 1000, gid 123; allows fsGroup 123"
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+allowPrivilegeEscalation: false
+allowPrivilegedContainer: false
+allowedCapabilities: null
+defaultAddCapabilities: null
+fsGroup:
+  type: MustRunAs
+  ranges:
+    - min: 123
+      max: 123
+groups: []
+# Priority so this SCC is chosen over restricted for the controller SA.
+priority: 5
+readOnlyRootFilesystem: false
+requiredDropCapabilities:
+  - KILL
+  - MKNOD
+runAsUser:
+  type: MustRunAs
+  uid: 1000
+runAsGroup:
+  type: MustRunAs
+  ranges:
+    - min: 123
+      max: 123
+seLinuxContext:
+  type: MustRunAs
+supplementalGroups:
+  type: MustRunAs
+  ranges:
+    - min: 123
+      max: 123
+users: []
+volumes:
+  - configMap
+  - downwardAPI
+  - emptyDir
+  - persistentVolumeClaim
+  - projected
+  - secret

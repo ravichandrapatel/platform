@@ -1,4 +1,5 @@
 # Kubernetes dev: gha-runner-scale-set (edit githubConfigUrl and runner image as needed)
+# For Kind/local: use deploy-with-kind.sh which sets image and githubConfigUrl via env.
 fullnameOverride: arc-scale-set
 githubConfigUrl: "https://github.com/YOUR_ORG_OR_ENTERPRISE"
 githubConfigSecret: arc-gh-secret
@@ -27,7 +28,7 @@ template:
         type: RuntimeDefault
     containers:
       - name: runner
-        image: ghcr.io/your-registry/gh-actions-runner:latest
+        image: ghcr.io/your-registry/gha-runner-scale-set-runner:latest
         imagePullPolicy: IfNotPresent
         command: ["/usr/bin/entrypoint.sh"]
         env:

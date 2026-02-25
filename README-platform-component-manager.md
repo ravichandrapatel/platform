@@ -33,7 +33,7 @@ The **Platform Component Manager** workflow lets you **promote** or **rollback**
 
 | Concept | Meaning |
 |--------|--------|
-| **Component path** | Folder or path under the repo: e.g. `platform/actions/dependency-check-ubi9`, or `workflows/compliance` (workflow folder/file). Used as the **tag name prefix**; the tag points to a **commit** (for workflows, after copying to `.github/workflows/`). |
+| **Component path** | Folder or path under the repo: e.g. `platform/actions/owasp-dependency-check`, or `workflows/compliance` (workflow folder/file). Used as the **tag name prefix**; the tag points to a **commit** (for workflows, after copying to `.github/workflows/`). |
 | **Full version tag** | Tag like `platform/actions/my-action/1.2.0`. Points to a **single commit** (whole repo) and is **never moved**. |
 | **Stable tag** | Tag like `platform/actions/my-action/v1`. Points to the “current” release for that major version and is **moved** on promote or rollback. |
 
@@ -54,7 +54,7 @@ The **Platform Component Manager** workflow lets you **promote** or **rollback**
 1. In the repo, go to **Actions** → **Platform Component Manager** → **Run workflow**.
 2. Fill the inputs:
    - **component_path** (required): Path to the component, relative to repo root.  
-     Examples: `platform/actions/dependency-check-ubi9`, `workflows/compliance`, `platform/workflows/compliance` (folder or single file).
+     Examples: `platform/actions/owasp-dependency-check`, `workflows/compliance`, `platform/workflows/compliance` (folder or single file).
    - **mode** (required): `promote` or `rollback`.
    - **version** (required): Target version for the **full** tag, e.g. `1.2.0` (promote) or the version you want to roll back to, e.g. `1.1.0` (rollback).
 3. Run the workflow on the branch you want (usually `main` or `release/*`). For **promote**, the workflow uses the commit that is `HEAD` of that branch at run time.
@@ -65,7 +65,7 @@ The **Platform Component Manager** workflow lets you **promote** or **rollback**
 
 | Input | Required | Description |
 |-------|----------|-------------|
-| `component_path` | Yes | Path of the component: action folder (e.g. `platform/actions/dependency-check-ubi9`) or workflow path (e.g. `workflows/compliance` folder or `workflows/compliance.yml`). Defines the tag prefix. For **subtree**, the path must exist. For **workflows**, on promote the workflow copies files to `.github/workflows/` then tags. |
+| `component_path` | Yes | Path of the component: action folder (e.g. `platform/actions/owasp-dependency-check`) or workflow path (e.g. `workflows/compliance` folder or `workflows/compliance.yml`). Defines the tag prefix. For **subtree**, the path must exist. For **workflows**, on promote the workflow copies files to `.github/workflows/` then tags. |
 | `mode` | Yes | `promote` – create/move tags. `rollback` – move stable tag to an existing full-version tag. |
 | `version` | Yes | Semantic version for the **full** tag (e.g. `1.2.0`). On promote this is the new version; on rollback this is the version the stable tag will point to. |
 | `tag_content` | No | **monorepo** (default) – tag points to current `HEAD` (whole repo). **subtree** – tag points to a commit that contains only the component path (folder structure preserved, e.g. `platform/actions/my-action/`). Use **subtree** if you want the tag to contain only that action; consumers use the same path (e.g. `uses: org/repo/platform/actions/my-action@platform/actions/my-action/1.2.0`). |

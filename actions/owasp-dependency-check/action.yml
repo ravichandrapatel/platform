@@ -1,10 +1,9 @@
-# Dependency-Check Action (UBI9). Runs the pre-built image with Podman only (no Docker).
-# Use on a runner that has Podman (e.g. ARC runner pod).
-# All dependency-check CLI options are exposed: booleans (pass flag when true), value options (pass when non-empty).
+# OWASP Dependency-Check Action. Runs the pre-built image with Podman only (no Docker).
+# Use on a runner that has Podman (e.g. ARC runner pod). Proxy options are not exposed.
 # See: https://dependency-check.github.io/DependencyCheck/dependency-check-cli/arguments.html
 
-name: 'Dependency Check (UBI9)'
-description: 'Run OWASP Dependency-Check using pre-built UBI9 image (Podman only)'
+name: 'OWASP Dependency Check'
+description: 'Run OWASP Dependency-Check using pre-built image (Podman only; no proxy options)'
 branding:
   icon: 'shield'
   color: 'red'
@@ -27,7 +26,7 @@ inputs:
   image:
     required: false
     default: ''
-    description: 'Dependency-Check image (default: GHCR image from this repo)'
+    description: 'OWASP Dependency-Check image (default: GHCR image from this repo)'
 
   # Boolean options (pass flag when true; default false unless noted)
   enableRetired:
@@ -376,34 +375,6 @@ inputs:
     required: false
     default: ''
     description: 'Working directory for bundle-audit'
-  proxyserver:
-    required: false
-    default: ''
-    description: 'Proxy server'
-  proxyport:
-    required: false
-    default: ''
-    description: 'Proxy port'
-  nonProxyHosts:
-    required: false
-    default: ''
-    description: 'Proxy exclusion list'
-  connectiontimeout:
-    required: false
-    default: ''
-    description: 'Connection timeout (ms)'
-  readtimeout:
-    required: false
-    default: ''
-    description: 'Read timeout (ms)'
-  proxypass:
-    required: false
-    default: ''
-    description: 'Proxy password'
-  proxyuser:
-    required: false
-    default: ''
-    description: 'Proxy username'
   connectionString:
     required: false
     default: ''
@@ -480,10 +451,6 @@ inputs:
     required: false
     default: ''
     description: 'Artifactory server URL'
-  artifactoryUseProxy:
-    required: false
-    default: ''
-    description: 'Artifactory use proxy (true/false)'
   artifactoryParallelAnalysis:
     required: false
     default: ''
@@ -512,10 +479,6 @@ inputs:
     required: false
     default: ''
     description: 'Nexus password'
-  nexusUsesProxy:
-    required: false
-    default: ''
-    description: 'Nexus use proxy (true/false)'
   ossIndexUsername:
     required: false
     default: ''
@@ -543,7 +506,7 @@ runs:
         if [ -n "${{ inputs.image }}" ]; then
           echo "image=${{ inputs.image }}" >> $GITHUB_OUTPUT
         else
-          echo "image=ghcr.io/${{ github.repository }}/dependency-check-ubi9:latest" >> $GITHUB_OUTPUT
+          echo "image=ghcr.io/${{ github.repository }}/owasp-dependency-check:latest" >> $GITHUB_OUTPUT
         fi
 
     - name: Run Dependency-Check
@@ -598,13 +561,6 @@ runs:
         [ -n "${{ inputs.go }}" ]                        && EXTRA+=(--go "${{ inputs.go }}")
         [ -n "${{ inputs.bundleAudit }}" ]               && EXTRA+=(--bundleAudit "${{ inputs.bundleAudit }}")
         [ -n "${{ inputs.bundleAuditWorkingDirectory }}" ] && EXTRA+=(--bundleAuditWorkingDirectory "$WS/${{ inputs.bundleAuditWorkingDirectory }}")
-        [ -n "${{ inputs.proxyserver }}" ]               && EXTRA+=(--proxyserver "${{ inputs.proxyserver }}")
-        [ -n "${{ inputs.proxyport }}" ]                  && EXTRA+=(--proxyport "${{ inputs.proxyport }}")
-        [ -n "${{ inputs.nonProxyHosts }}" ]              && EXTRA+=(--nonProxyHosts "${{ inputs.nonProxyHosts }}")
-        [ -n "${{ inputs.connectiontimeout }}" ]         && EXTRA+=(--connectiontimeout "${{ inputs.connectiontimeout }}")
-        [ -n "${{ inputs.readtimeout }}" ]               && EXTRA+=(--readtimeout "${{ inputs.readtimeout }}")
-        [ -n "${{ inputs.proxypass }}" ]                 && EXTRA+=(--proxypass "${{ inputs.proxypass }}")
-        [ -n "${{ inputs.proxyuser }}" ]                 && EXTRA+=(--proxyuser "${{ inputs.proxyuser }}")
         [ -n "${{ inputs.connectionString }}" ]          && EXTRA+=(--connectionString "${{ inputs.connectionString }}")
         [ -n "${{ inputs.dbDriverName }}" ]               && EXTRA+=(--dbDriverName "${{ inputs.dbDriverName }}")
         [ -n "${{ inputs.dbDriverPath }}" ]               && EXTRA+=(--dbDriverPath "${{ inputs.dbDriverPath }}")
@@ -624,7 +580,6 @@ runs:
         [ -n "${{ inputs.centralPassword }}" ]           && EXTRA+=(--centralPassword "${{ inputs.centralPassword }}")
         [ -n "${{ inputs.centralBearerToken }}" ]        && EXTRA+=(--centralBearerToken "${{ inputs.centralBearerToken }}")
         [ -n "${{ inputs.artifactoryUrl }}" ]            && EXTRA+=(--artifactoryUrl "${{ inputs.artifactoryUrl }}")
-        [ -n "${{ inputs.artifactoryUseProxy }}" ]        && EXTRA+=(--artifactoryUseProxy "${{ inputs.artifactoryUseProxy }}")
         [ -n "${{ inputs.artifactoryParallelAnalysis }}" ] && EXTRA+=(--artifactoryParallelAnalysis "${{ inputs.artifactoryParallelAnalysis }}")
         [ -n "${{ inputs.artifactoryUsername }}" ]       && EXTRA+=(--artifactoryUsername "${{ inputs.artifactoryUsername }}")
         [ -n "${{ inputs.artifactoryApiToken }}" ]       && EXTRA+=(--artifactoryApiToken "${{ inputs.artifactoryApiToken }}")
@@ -632,7 +587,6 @@ runs:
         [ -n "${{ inputs.nexus }}" ]                     && EXTRA+=(--nexus "${{ inputs.nexus }}")
         [ -n "${{ inputs.nexusUser }}" ]                 && EXTRA+=(--nexusUser "${{ inputs.nexusUser }}")
         [ -n "${{ inputs.nexusPass }}" ]                 && EXTRA+=(--nexusPass "${{ inputs.nexusPass }}")
-        [ -n "${{ inputs.nexusUsesProxy }}" ]            && EXTRA+=(--nexusUsesProxy "${{ inputs.nexusUsesProxy }}")
         [ -n "${{ inputs.ossIndexUsername }}" ]          && EXTRA+=(--ossIndexUsername "${{ inputs.ossIndexUsername }}")
         [ -n "${{ inputs.ossIndexPassword }}" ]          && EXTRA+=(--ossIndexPassword "${{ inputs.ossIndexPassword }}")
         [ -n "${{ inputs.ossIndexRemoteErrorWarnOnly }}" ] && EXTRA+=(--ossIndexRemoteErrorWarnOnly "${{ inputs.ossIndexRemoteErrorWarnOnly }}")
@@ -708,10 +662,19 @@ runs:
         [ "${{ inputs.disableHostedSuppressions }}" = 'true' ]        && EXTRA+=(--disableHostedSuppressions)
         [ "${{ inputs.hostedSuppressionsForceUpdate }}" = 'true' ]     && EXTRA+=(--hostedSuppressionsForceUpdate)
 
+        # Bind-mount runner's /proc, /sys, /sys/fs/cgroup, /dev/pts so crun does not create new mounts (avoids "mount ... permission denied" OCI errors in nested rootless).
+        # --cgroups=disabled plus bind-mount cgroup so runtime does not mount cgroup2 at /sys/fs/cgroup.
         $RUNNER run --rm \
           --cgroups=disabled \
           --security-opt unmask=/proc \
+          --security-opt unmask=/proc/* \
           --security-opt unmask=/sys \
+          --security-opt unmask=/dev/pts \
+          -v /proc:/proc \
+          -v /sys:/sys \
+          -v /sys/fs/cgroup:/sys/fs/cgroup \
+          -v /dev/pts:/dev/pts \
+          -v /dev/ptmx:/dev/ptmx \
           -v "$GITHUB_WORKSPACE:$WS:z" \
           -w $WS \
           "$IMAGE" \
@@ -720,3 +683,19 @@ runs:
           --format "${{ inputs.format }}" \
           --out "$WS/${{ inputs.out }}" \
           "${EXTRA[@]}"
+
+        # Clean up image and storage to avoid runner disk space issues (ARC/ephemeral pods).
+        # Run cleanup; capture exit codes and log on failure so we don't hide real errors (no blind || true).
+        # Step still succeeds (we don't exit 1) so the job passes even if cleanup fails.
+        if [ -n "$RUNNER" ] && [ -n "$IMAGE" ]; then
+          echo "Removing owasp-dependency-check image and pruning storage..."
+          if ! $RUNNER rmi "$IMAGE" 2>/dev/null; then
+            echo "::notice::rmi $IMAGE failed (image may already be removed or in use)"
+          fi
+          if ! $RUNNER image prune -f 2>/dev/null; then
+            echo "::notice::image prune failed"
+          fi
+          if ! $RUNNER container prune -f 2>/dev/null; then
+            echo "::notice::container prune failed"
+          fi
+        fi

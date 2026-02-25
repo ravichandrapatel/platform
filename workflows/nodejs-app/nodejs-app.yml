@@ -1,0 +1,334 @@
+# =============================================================================
+# Node.js App – CI pipeline (setup, lint, test, build, security, OWASP, Sonar, Buildah image)
+# =============================================================================
+# Reusable workflow for building Node.js applications. Use from app repos or
+# copy to .github/workflows/ (via platform component manager). Runs on push/PR
+# and workflow_dispatch. Uses Buildah only for image build (no Docker).
+#
+# Secrets (when used): SONAR_TOKEN (SonarCloud), GITHUB_TOKEN (packages), optional
+# NVD_API_KEY (OWASP dependency-check), CONTAINER_REGISTRY_* for custom registry.
+# =============================================================================
+
+name: Node.js App CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_call:
+    inputs:
+      node_version:
+        required: false
+        default: '20'
+        type: string
+      working_directory:
+        required: false
+        default: '.'
+        type: string
+      project_name:
+        required: false
+        default: ''
+        type: string
+      image_name:
+        required: false
+        default: ''
+        type: string
+      containerfile_path:
+        required: false
+        default: 'Containerfile'
+        type: string
+      context_path:
+        required: false
+        default: '.'
+        type: string
+      run_owasp:
+        required: false
+        default: true
+        type: boolean
+      run_sonar:
+        required: false
+        default: true
+        type: boolean
+      run_image_build:
+        required: false
+        default: true
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      node_version:
+        description: 'Node.js version (e.g. 20, lts/*)'
+        required: false
+        default: '20'
+        type: string
+      working_directory:
+        description: 'App directory (relative to repo root)'
+        required: false
+        default: '.'
+        type: string
+
+env:
+  NODE_VERSION: ${{ inputs.node_version || github.event.inputs.node_version || '20' }}
+  WORKING_DIR: ${{ inputs.working_directory || github.event.inputs.working_directory || '.' }}
+  PROJECT_NAME: ${{ inputs.project_name || github.event.repository.name }}
+  IMAGE_NAME: ${{ inputs.image_name || github.event.repository.name }}
+  CONTAINERFILE: ${{ inputs.containerfile_path || 'Containerfile' }}
+  CONTEXT_PATH: ${{ inputs.context_path || '.' }}
+  REGISTRY: ghcr.io
+  REPOSITORY: ${{ github.repository }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Setup, lint, test
+  # ---------------------------------------------------------------------------
+  setup-lint-test:
+    name: Setup · Lint · Test
+    runs-on: ubuntu-latest
+    defaults: &defaults-run
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+    steps:
+      - &checkout
+        name: Checkout
+        uses: actions/checkout@v4
+
+      - &setup-node
+        name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ${{ env.WORKING_DIR }}/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Lint
+        run: |
+          if grep -q '"lint"' package.json 2>/dev/null; then
+            npm run lint
+          elif command -v npx &>/dev/null; then
+            npx eslint . --max-warnings 0 || true
+          else
+            echo "No lint script or ESLint found; skipping."
+          fi
+
+      - name: Test
+        run: |
+          if grep -q '"test"' package.json; then
+            npm test
+          else
+            echo "No test script in package.json; skipping."
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Build stage (produce build artifact)
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build
+    needs: setup-lint-test
+    runs-on: ubuntu-latest
+    defaults: *defaults-run
+    steps:
+      - *checkout
+
+      - *setup-node
+
+      - &install-deps
+        name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Build
+        run: |
+          if grep -q '"build"' package.json; then
+            npm run build
+          else
+            echo "No build script; skipping."
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: ${{ env.WORKING_DIR }}/dist
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Security – npm audit
+  # ---------------------------------------------------------------------------
+  security:
+    name: Security (npm audit)
+    needs: setup-lint-test
+    runs-on: ubuntu-latest
+    defaults: *defaults-run
+    steps:
+      - *checkout
+
+      - *setup-node
+
+      - *install-deps
+
+      - name: npm audit
+        run: |
+          npm audit --audit-level=high || true
+          echo "Audit completed (non-blocking)."
+
+  # ---------------------------------------------------------------------------
+  # OWASP Dependency-Check (Podman/Buildah + platform image or action)
+  # ---------------------------------------------------------------------------
+  owasp:
+    name: OWASP Dependency-Check
+    if: github.event_name != 'workflow_call' || inputs.run_owasp != false
+    needs: setup-lint-test
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout
+
+      - &install-buildah
+        name: Install Buildah (if no Podman/Buildah)
+        run: |
+          if ! command -v podman &>/dev/null && ! command -v buildah &>/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y buildah
+          fi
+
+      - name: OWASP Dependency-Check (platform action)
+        uses: ./platform/actions/owasp-dependency-check
+        if: hashFiles('platform/actions/owasp-dependency-check/action.yml') != ''
+        with:
+          project: ${{ env.PROJECT_NAME }}
+          path: ${{ env.WORKING_DIR }}
+          format: HTML
+          out: reports/owasp
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+
+      - name: OWASP Dependency-Check (container image when action not in repo)
+        if: hashFiles('platform/actions/owasp-dependency-check/action.yml') == ''
+        run: |
+          RT=$(command -v podman || command -v buildah)
+          IMG="ghcr.io/${{ github.repository }}/owasp-dependency-check:latest"
+          mkdir -p reports/owasp
+          $RT run --rm \
+            -v "${{ github.workspace }}":/src:rw \
+            -w /src \
+            -e NVD_API_KEY="${{ secrets.NVD_API_KEY }}" \
+            "$IMG" \
+            --project "${{ env.PROJECT_NAME }}" \
+            --scan "/src/${{ env.WORKING_DIR }}" \
+            --format HTML \
+            --out reports/owasp \
+            --noupdate \
+            || echo "OWASP scan skipped (image or scan failed)."
+
+  # ---------------------------------------------------------------------------
+  # SonarCloud
+  # ---------------------------------------------------------------------------
+  sonar:
+    name: SonarCloud
+    if: github.event_name != 'workflow_call' || inputs.run_sonar != false
+    needs: [setup-lint-test, build]
+    runs-on: ubuntu-latest
+    defaults: *defaults-run
+    steps:
+      - &checkout-deep
+        name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - *setup-node
+
+      - name: Install dependencies and build
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          if grep -q '"build"' package.json; then npm run build; fi
+
+      - name: SonarCloud scan
+        uses: SonarSource/sonarcloud-github-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ github.repository_owner }}_${{ env.PROJECT_NAME }}
+            -Dsonar.organization=${{ github.repository_owner }}
+            -Dsonar.sources=${{ env.WORKING_DIR }}
+
+  # ---------------------------------------------------------------------------
+  # Buildah image build and push
+  # ---------------------------------------------------------------------------
+  image:
+    name: Buildah image
+    if: (github.event_name != 'workflow_call' || inputs.run_image_build != false) && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    needs: [setup-lint-test, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - *checkout
+
+      - <<: *install-buildah
+        name: Install Buildah
+
+      - name: Detect container runtime (Podman or Buildah)
+        id: runtime
+        run: |
+          if command -v podman &>/dev/null; then
+            echo "runtime=podman" >> $GITHUB_OUTPUT
+          elif command -v buildah &>/dev/null; then
+            echo "runtime=buildah" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Neither Podman nor Buildah is available."
+            exit 1
+          fi
+
+      - name: Check for Containerfile
+        id: containerfile
+        run: |
+          CF="${{ env.CONTEXT_PATH }}/${{ env.CONTAINERFILE }}"
+          if [ -f "$CF" ]; then
+            echo "path=$CF" >> $GITHUB_OUTPUT
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build image
+        if: steps.containerfile.outputs.exists == 'true'
+        run: |
+          RT="${{ steps.runtime.outputs.runtime }}"
+          cd "${{ env.CONTEXT_PATH }}"
+          $RT build \
+            --tag ${{ env.IMAGE_NAME }}:latest \
+            --file ${{ env.CONTAINERFILE }} \
+            .
+
+      - name: Log in to registry
+        if: steps.containerfile.outputs.exists == 'true'
+        run: |
+          RT="${{ steps.runtime.outputs.runtime }}"
+          REG="${{ env.REGISTRY }}"
+          if [ "$REG" = "ghcr.io" ]; then
+            echo "${{ secrets.GITHUB_TOKEN }}" | $RT login ghcr.io -u ${{ github.actor }} --password-stdin
+          else
+            echo "${{ secrets.CONTAINER_REGISTRY_PASSWORD }}" | $RT login "$REG" -u "${{ secrets.CONTAINER_REGISTRY_USERNAME }}" --password-stdin
+          fi
+
+      - name: Push image
+        if: steps.containerfile.outputs.exists == 'true'
+        run: |
+          RT="${{ steps.runtime.outputs.runtime }}"
+          REG="${{ env.REGISTRY }}"
+          REPO="${{ env.REPOSITORY }}"
+          IMG="$REG/$REPO/${{ env.IMAGE_NAME }}"
+          IMAGE_ID=$($RT images -q ${{ env.IMAGE_NAME }}:latest)
+          $RT tag $IMAGE_ID "$IMG:latest"
+          $RT push "$IMG:latest"
+          $RT tag $IMAGE_ID "$IMG:${{ github.run_id }}"
+          $RT push "$IMG:${{ github.run_id }}"

@@ -1,4 +1,4 @@
 # Optional metadata for platform README table (auto-updated by compliance workflow).
-name: dependency-check-ubi9
+name: owasp-dependency-check
 base: UBI9
 purpose: OWASP Dependency-Check CLI (nightly build; compliance pulls and scans only).

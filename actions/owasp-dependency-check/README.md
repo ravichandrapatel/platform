@@ -1,15 +1,15 @@
-# Dependency Check (UBI9)
+# OWASP Dependency Check
 
-Run **OWASP Dependency-Check** in CI using a pre-built UBI9 container image. The action uses **Podman** only (no Docker) and is intended for runners that have Podman installed—for example, ARC (Actions Runner Controller) runner pods.
+Run **OWASP Dependency-Check** in CI using a pre-built container image. The action uses **Podman** only (no Docker) and is intended for runners that have Podman installed—for example, ARC (Actions Runner Controller) runner pods. **Proxy-related options are not exposed** in this action.
 
-The container image is built and pushed by this repo’s **Dependency-Check UBI9 (nightly)** workflow. All [Dependency-Check CLI arguments](https://dependency-check.github.io/DependencyCheck/dependency-check-cli/arguments.html) are exposed as action inputs.
+The container image is built and pushed by this repo’s **OWASP Dependency-Check (nightly)** workflow. [Dependency-Check CLI arguments](https://dependency-check.github.io/DependencyCheck/dependency-check-cli/arguments.html) are exposed as action inputs (except proxy).
 
 ---
 
 ## Requirements
 
 - **Podman** must be available on the runner. The action will fail with a clear error if only Docker is present.
-- Use a runner that provides Podman (e.g. a self-hosted ARC runner with the dependency-check-ubi9 or gh-actions-runner-podman image).
+- Use a runner that provides Podman (e.g. a self-hosted ARC runner with the owasp-dependency-check or gha-runner-scale-set-runner image).
 
 ---
 
@@ -21,7 +21,7 @@ The container image is built and pushed by this repo’s **Dependency-Check UBI9
 - uses: actions/checkout@v4
 
 - name: OWASP Dependency-Check
-  uses: ./platform/actions/dependency-check-ubi9
+  uses: ./platform/actions/owasp-dependency-check
   with:
     project: my-app
     path: .
@@ -36,12 +36,12 @@ Pin to a tag for stability. You must pass the **image** input because the defaul
 - uses: actions/checkout@v4
 
 - name: OWASP Dependency-Check
-  uses: YOUR_ORG/IDP/platform/actions/dependency-check-ubi9@v1.0.0
+  uses: YOUR_ORG/IDP/platform/actions/owasp-dependency-check@v1.0.0
   with:
     project: my-app
     path: .
     format: HTML
-    image: ghcr.io/YOUR_ORG/IDP/dependency-check-ubi9:latest
+    image: ghcr.io/YOUR_ORG/IDP/owasp-dependency-check:latest
 ```
 
 ---
@@ -61,7 +61,7 @@ Pin to a tag for stability. You must pass the **image** input because the defaul
 | Input          | Default   | Description |
 |----------------|-----------|-------------|
 | `out`          | `reports` | Output directory for reports (relative to workspace). |
-| `image`        | (GHCR from this repo) | Full image reference (e.g. `ghcr.io/org/repo/dependency-check-ubi9:latest`). Required when using the action from another repo. |
+| `image`        | (GHCR from this repo) | Full image reference (e.g. `ghcr.io/org/repo/owasp-dependency-check:latest`). Required when using the action from another repo. |
 | `failOnCVSS`   | —         | Fail the step if any vulnerability has CVSS ≥ this (0–10). Example: `7`. |
 | `suppression`  | —         | Path(s) to suppression XML files, comma-separated; or HTTP(S) URLs. Paths are relative to workspace. |
 | `exclude`      | —         | Path patterns to exclude from scan, comma-separated. |
@@ -102,7 +102,7 @@ Reports are written under the workspace path given by `out` (default `reports`).
 ```yaml
 - uses: actions/checkout@v4
 - name: Dependency-Check
-  uses: ./platform/actions/dependency-check-ubi9
+  uses: ./platform/actions/owasp-dependency-check
   with:
     project: my-service
     path: .
@@ -117,7 +117,7 @@ Reports are written under the workspace path given by `out` (default `reports`).
 ### Fail on high/critical (CVSS ≥ 7)
 
 ```yaml
-- uses: ./platform/actions/dependency-check-ubi9
+- uses: ./platform/actions/owasp-dependency-check
   with:
     project: my-app
     path: .
@@ -130,7 +130,7 @@ Reports are written under the workspace path given by `out` (default `reports`).
 Keep a suppression XML in the repo (e.g. `dependency-check-suppressions.xml`) and reference it:
 
 ```yaml
-- uses: ./platform/actions/dependency-check-ubi9
+- uses: ./platform/actions/owasp-dependency-check
   with:
     project: my-app
     path: .
@@ -145,7 +145,7 @@ Multiple files (or URLs): comma-separated, e.g. `suppression: suppressions.xml,h
 Reduces rate limiting and speeds up updates when `noupdate: false`:
 
 ```yaml
-- uses: ./platform/actions/dependency-check-ubi9
+- uses: ./platform/actions/owasp-dependency-check
   with:
     project: my-app
     path: .
@@ -163,7 +163,7 @@ Create an [NVD API key](https://nvd.nist.gov/developers/request-an-api-key) and 
 - uses: actions/checkout@v4
 - name: Dependency-Check
   id: dc
-  uses: ./platform/actions/dependency-check-ubi9
+  uses: ./platform/actions/owasp-dependency-check
   with:
     project: my-app
     path: .
@@ -180,7 +180,7 @@ Create an [NVD API key](https://nvd.nist.gov/developers/request-an-api-key) and 
 ### Scan a subdirectory
 
 ```yaml
-- uses: ./platform/actions/dependency-check-ubi9
+- uses: ./platform/actions/owasp-dependency-check
   with:
     project: backend-api
     path: backend
@@ -190,7 +190,7 @@ Create an [NVD API key](https://nvd.nist.gov/developers/request-an-api-key) and 
 ### Exclude paths
 
 ```yaml
-- uses: ./platform/actions/dependency-check-ubi9
+- uses: ./platform/actions/owasp-dependency-check
   with:
     project: my-app
     path: .
@@ -211,8 +211,8 @@ The action does not define outputs; it writes reports to the directory specified
 
 ## Image and versioning
 
-- **Default image:** `ghcr.io/<github.repository>/dependency-check-ubi9:latest` when the action runs in this repo.
-- **From other repos:** Set the `image` input (e.g. `ghcr.io/YOUR_ORG/IDP/dependency-check-ubi9:latest`) and pin the action ref (e.g. `@v1.0.0`).
+- **Default image:** `ghcr.io/<github.repository>/owasp-dependency-check:latest` when the action runs in this repo.
+- **From other repos:** Set the `image` input (e.g. `ghcr.io/YOUR_ORG/IDP/owasp-dependency-check:latest`) and pin the action ref (e.g. `@v1.0.0`).
 - The image is built by the **Dependency-Check UBI9 (nightly)** workflow in this repo and pushed to GHCR. Use the same image reference in `image` that your org publishes.
 
 ---

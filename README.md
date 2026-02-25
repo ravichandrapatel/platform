@@ -17,15 +17,15 @@ Single folder for **custom reusable actions** and **container images** used by t
 
 ## Reusable actions
 
-### dependency-check-ubi9
+### owasp-dependency-check
 
-**Path:** `platform/actions/dependency-check-ubi9/`
+**Path:** `platform/actions/owasp-dependency-check/`
 
 Runs OWASP Dependency-Check using a pre-built UBI9 image. Requires **Podman** on the runner (e.g. ARC runner pod).
 
 **Use from this repo:**
 ```yaml
-- uses: ./platform/actions/dependency-check-ubi9
+- uses: ./platform/actions/owasp-dependency-check
   with:
     project: my-app
     path: .
@@ -34,13 +34,13 @@ Runs OWASP Dependency-Check using a pre-built UBI9 image. Requires **Podman** on
 
 **Use from another repo (application teams):** Pin to a release tag for stability.
 ```yaml
-- uses: YOUR_ORG/IDP/platform/actions/dependency-check-ubi9@v1.0.0   # or @main for latest
+- uses: YOUR_ORG/IDP/platform/actions/owasp-dependency-check@v1.0.0   # or @main for latest
   with:
     project: my-app
     path: .
     format: HTML
     # When using from another repo, pass the platform image (built and pushed by this repo):
-    image: ghcr.io/YOUR_ORG/IDP/dependency-check-ubi9:latest
+    image: ghcr.io/YOUR_ORG/IDP/owasp-dependency-check:latest
 ```
 
 See [Releasing](#releasing) for how we publish versions so app teams can use `@v1.x.x`.
@@ -52,9 +52,9 @@ See [Releasing](#releasing) for how we publish versions so app teams can use `@v
 <!-- IMAGES_TABLE_START -->
 | Image | Path | Base | Purpose |
 |-------|------|------|---------|
-| **dependency-check-ubi9** | `platform/images/dependency-check-ubi9/` | UBI9 | OWASP Dependency-Check CLI (nightly build; compliance pulls and scans only). |
-| **gh-actions-runner-podman** | `platform/images/gh-actions-runner-podman/` | UBI9 | ARC self-hosted runner with rootless Podman/Buildah. |
-| **gha-runner-scale-set-controller-ubi9** | `platform/images/gha-runner-scale-set-controller-ubi9/` | UBI9 minimal | ARC controller (binaries copied from upstream; no distroless). |
+| **owasp-dependency-check** | `platform/images/owasp-dependency-check/` | UBI9 | OWASP Dependency-Check CLI (nightly build; compliance pulls and scans only). |
+| **gha-runner-scale-set-runner** | `platform/images/gha-runner-scale-set-runner/` | UBI9 | ARC self-hosted runner with rootless Podman/Buildah. |
+| **gha-runner-scale-set-controller** | `platform/images/gha-runner-scale-set-controller/` | UBI9 minimal | ARC controller (binaries copied from upstream; no distroless). |
 <!-- IMAGES_TABLE_END -->
 
 ### Adding a new image
@@ -70,9 +70,9 @@ The compliance workflow and README table will pick it up automatically.
 
 ### Build tags
 
-- **dependency-check-ubi9:** Built by nightly; compliance pulls `ghcr.io/<repo>/dependency-check-ubi9:latest` and scans.
-- **gh-actions-runner-podman:** Built in compliance or locally; tag e.g. `ghcr.io/org/gh-actions-runner:latest`.
-- **gha-runner-scale-set-controller-ubi9:** Built in compliance or locally; tag e.g. `ghcr.io/org/gha-runner-scale-set-controller:ubi9-0.13.1`.
+- **owasp-dependency-check:** Built by nightly; compliance pulls `ghcr.io/<repo>/owasp-dependency-check:latest` and scans.
+- **gha-runner-scale-set-runner:** Built in compliance or locally; tag e.g. `ghcr.io/org/gha-runner-scale-set-runner:latest`.
+- **gha-runner-scale-set-controller:** Built in compliance or locally; tag e.g. `ghcr.io/org/gha-runner-scale-set-controller:0.13.1`.
 
 ### Compliance status
 
@@ -98,14 +98,14 @@ Workflows that build or scan platform images live in **`.github/workflows/`** at
 
 | Workflow | Purpose |
 |----------|--------|
-| Dependency-Check UBI9 (nightly) | Build and push dependency-check-ubi9 image to GHCR |
+| Dependency-Check UBI9 (nightly) | Build and push owasp-dependency-check image to GHCR |
 | Compliance | First Sunday of month + manual: Trivy config+fs per image (matrix, max 4); build+push only if Critical=0; updates compliance table in README |
 
 ---
 
 ## Releasing tagged versions
 
-- **Reusable actions:** Use the **Platform Component Manager** workflow (Actions → Platform Component Manager → Run workflow). Set `component_path` to the action folder (e.g. `platform/actions/dependency-check-ubi9`), choose **promote** or **rollback**, and the **version** (e.g. `1.2.0`). This creates/updates tags like `platform/actions/dependency-check-ubi9/1.2.0` and `platform/actions/dependency-check-ubi9/v1`. See [README-platform-component-manager.md](README-platform-component-manager.md).
+- **Reusable actions:** Use the **Platform Component Manager** workflow (Actions → Platform Component Manager → Run workflow). Set `component_path` to the action folder (e.g. `platform/actions/owasp-dependency-check`), choose **promote** or **rollback**, and the **version** (e.g. `1.2.0`). This creates/updates tags like `platform/actions/owasp-dependency-check/1.2.0` and `platform/actions/owasp-dependency-check/v1`. See [README-platform-component-manager.md](README-platform-component-manager.md).
 - **Reusable workflows:** They live in `.github/workflows/`. To release a tagged version, create a tag that includes the desired commit (e.g. repo tag `v1.0.0` or use the component manager with a path like `.github/workflows` if you version that folder). Callers reference the workflow with that ref: `uses: org/repo/.github/workflows/name.yml@v1.0.0`.
 
 ---
@@ -128,7 +128,7 @@ Release and tag promotion use only `run:` (git + `gh` CLI).
 
 ### Usage for application teams
 
-- **Stable (production):** `uses: YOUR_ORG/IDP/platform/actions/dependency-check-ubi9@1.0.0`
-- **Release candidate (testing):** `uses: YOUR_ORG/IDP/platform/actions/dependency-check-ubi9@1.0.0-rc`
+- **Stable (production):** `uses: YOUR_ORG/IDP/platform/actions/owasp-dependency-check@1.0.0`
+- **Release candidate (testing):** `uses: YOUR_ORG/IDP/platform/actions/owasp-dependency-check@1.0.0-rc`
 
-When using from another repo, pass the **image** input (e.g. `ghcr.io/YOUR_ORG/IDP/dependency-check-ubi9:latest`).
+When using from another repo, pass the **image** input (e.g. `ghcr.io/YOUR_ORG/IDP/owasp-dependency-check:latest`).

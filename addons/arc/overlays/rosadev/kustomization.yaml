@@ -9,6 +9,9 @@ resources:
   - scc-github-arc.yaml
   - clusterrole-scc-github-arc.yaml
   - rolebinding-scc.yaml
+  - scc-github-arc-controller.yaml
+  - clusterrole-scc-github-arc-controller.yaml
+  - rolebinding-scc-controller.yaml
 
 helmCharts:
   - name: gha-runner-scale-set-controller

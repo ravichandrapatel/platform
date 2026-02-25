@@ -23,11 +23,13 @@ template:
       runAsGroup: 123
       fsGroup: 123
       allowPrivilegeEscalation: true
+      # Required for nested podman/crun: kernel allows proc/sys mount; see podman#20453.
+      procMount: Unmasked
       seccompProfile:
         type: RuntimeDefault
     containers:
       - name: runner
-        image: ghcr.io/your-registry/gh-actions-runner:latest
+        image: ghcr.io/your-registry/gha-runner-scale-set-runner:latest
         imagePullPolicy: IfNotPresent
         command: ["/usr/bin/entrypoint.sh"]
         env:
