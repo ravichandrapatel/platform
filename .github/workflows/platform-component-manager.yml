@@ -71,9 +71,20 @@ jobs:
                 for f in "$PATH_NAME"/*; do
                   [ -e "$f" ] || continue
                   [ -f "$f" ] || continue
+                  case "$f" in
+                    *.yml|*.yaml) ;;
+                    *) continue ;;
+                  esac
                   cp "$f" ".github/workflows/$(basename "$f")"
                 done
               elif [ -f "$PATH_NAME" ]; then
+                case "$PATH_NAME" in
+                  *.yml|*.yaml) ;;
+                  *)
+                    echo "::error::Workflow file must be .yml or .yaml: $PATH_NAME"
+                    exit 1
+                    ;;
+                esac
                 cp "$PATH_NAME" ".github/workflows/$(basename "$PATH_NAME")"
               else
                 echo "::error::Workflow path $PATH_NAME not found (use folder workflows/name/ or platform/workflows/name/ or file)."
@@ -126,10 +137,21 @@ jobs:
                   for f in "$PATH_NAME"/*; do
                     [ -e "$f" ] || continue
                     [ -f "$f" ] || continue
+                    case "$f" in
+                      *.yml|*.yaml) ;;
+                      *) continue ;;
+                    esac
                     WF_FILE=".github/workflows/$(basename "$f")"
                     git checkout "$ORIG_REF" -- "$WF_FILE" 2>/dev/null || true
                   done
                 else
+                  case "$PATH_NAME" in
+                    *.yml|*.yaml) ;;
+                    *)
+                      echo "::error::Workflow file must be .yml or .yaml: $PATH_NAME"
+                      exit 1
+                      ;;
+                  esac
                   WF_FILE=".github/workflows/$(basename "$PATH_NAME")"
                   git checkout "$ORIG_REF" -- "$WF_FILE" 2>/dev/null || true
                 fi
