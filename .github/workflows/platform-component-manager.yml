@@ -129,6 +129,10 @@ jobs:
           if [ "${{ github.event.inputs.mode }}" = "promote" ]; then
             echo "Promoting $PATH_NAME to version $VER (tag_content=$TAG_CONTENT)..."
             ORIG_REF=$(git rev-parse HEAD)
+            ORIG_BRANCH=$(git branch --show-current 2>/dev/null || true)
+            if [ -z "$ORIG_BRANCH" ]; then
+              ORIG_BRANCH="main"
+            fi
 
             if [ "$TAG_CONTENT" = "subtree" ]; then
               if [ ! -d "$PATH_NAME" ] && [ ! -f "$PATH_NAME" ]; then
@@ -177,7 +181,7 @@ jobs:
               git tag -f "$STABLE_TAG" -m "Stable $PATH_NAME $MAJOR" "$SUBTREE_BRANCH"
               git push origin "$FULL_TAG"
               git push origin "$STABLE_TAG" --force
-              git checkout -
+              git checkout "$ORIG_BRANCH"
               git branch -D "$SUBTREE_BRANCH"
               git push origin --delete "$SUBTREE_BRANCH" 2>/dev/null || true
               echo "Subtree tag created: $FULL_TAG"
