@@ -43,6 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      workflows: write
 
     steps:
       # --- Official GitHub action only; fetch-depth 0 needed for tag history ---
