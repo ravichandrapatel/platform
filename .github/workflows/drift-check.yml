@@ -1,0 +1,59 @@
+# =============================================================================
+# Terraform Drift Auditor (cron + manual)
+# =============================================================================
+# Runs the Drift Auditor on a schedule or via workflow_dispatch. Uses a single
+# runner and ProcessPoolExecutor (up to 10 parallel plans) with worker isolation
+# to avoid workspace collisions. Creates/updates one GitHub Issue "Infrastructure
+# Drift Report"; closes it when drift is resolved.
+#
+# Prerequisites: S3 backend; configure AWS credentials (OIDC or env) so the
+# runner can read state. Set TF_WORKING_DIR / vars_folder to match your layout.
+# =============================================================================
+
+name: Terraform Drift Check
+
+on:
+  schedule:
+    # Run daily at 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      working_directory:
+        description: 'Terraform working directory (e.g. . or terraform)'
+        required: false
+        default: '.'
+      vars_folder:
+        description: 'Folder with *.tfvars relative to working dir (e.g. envs)'
+        required: false
+        default: 'envs'
+
+env:
+  TF_WORKING_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.working_directory || '.' }}
+  TF_VARS_FOLDER: ${{ github.event_name == 'workflow_dispatch' && inputs.vars_folder || 'envs' }}
+  TF_EXEC_IAM_ROLE: ${{ vars.TF_EXEC_IAM_ROLE || '' }}
+  TF_EXEC_ROLE_REGION: ${{ vars.TF_EXEC_ROLE_REGION || 'us-east-1' }}
+
+jobs:
+  drift-audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        if: env.TF_EXEC_IAM_ROLE != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.TF_EXEC_IAM_ROLE }}
+          aws-region: ${{ env.TF_EXEC_ROLE_REGION }}
+
+      - name: Terraform Drift Auditor
+        uses: ./platform/actions/drift-auditor
+        with:
+          working_dir: ${{ env.TF_WORKING_DIR }}
+          vars_folder: ${{ env.TF_VARS_FOLDER }}
+          max_parallel: '10'
+          terraform_version: '1.9.0'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          repo: ${{ github.repository }}
