@@ -77,25 +77,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Podman/Buildah only; no Docker. ARC-friendly.
-      - name: Install Buildah (if neither Podman nor Buildah present)
+      # Buildah only for builds (ARC-friendly; no Docker). Rootful build for UBI/rootless base images.
+      - name: Install Buildah
         run: |
-          if ! command -v podman &>/dev/null && ! command -v buildah &>/dev/null; then
+          if ! command -v buildah &>/dev/null; then
             sudo apt-get update -qq && sudo apt-get install -y buildah
           fi
+          buildah --version
 
-      - name: Detect container runtime (Podman or Buildah)
+      - name: Set container runtime to Buildah
         id: runtime
-        run: |
-          # Prefer buildah when available; fall back to podman.
-          if command -v buildah &>/dev/null; then
-            echo "runtime=buildah" >> $GITHUB_OUTPUT
-          elif command -v podman &>/dev/null; then
-            echo "runtime=podman" >> $GITHUB_OUTPUT
-          else
-            echo "::error::Neither Podman nor Buildah is available."
-            exit 1
-          fi
+        run: echo "runtime=buildah" >> $GITHUB_OUTPUT
 
       - name: Set image path
         id: path
@@ -174,13 +166,14 @@ jobs:
           echo "count=$C" >> $GITHUB_OUTPUT
           echo "Critical count: $C"
 
+      # Rootful build: UBI and similar base images need full UID/GID in user namespace.
+      # Login as root so build/push (also run with sudo) share the same auth.
       - name: Log in to registry
         if: steps.critical.outputs.count == '0'
         run: |
           RT="${{ steps.runtime.outputs.runtime }}"
           REG="${{ env.REGISTRY }}"
           if [ "$REG" = "ghcr.io" ]; then
-            # Prefer service account for scheduled runs to avoid tying automation to a human actor.
             if [ "${{ github.event_name }}" = "schedule" ] && [ -n "${{ secrets.GHCR_SERVICE_USERNAME }}" ] && [ -n "${{ secrets.GHCR_SERVICE_TOKEN }}" ]; then
               USER="${{ secrets.GHCR_SERVICE_USERNAME }}"
               PASS="${{ secrets.GHCR_SERVICE_TOKEN }}"
@@ -188,11 +181,12 @@ jobs:
               USER="${{ github.actor }}"
               PASS="${{ secrets.GITHUB_TOKEN }}"
             fi
-            echo "$PASS" | $RT login ghcr.io -u "$USER" --password-stdin
+            echo "$PASS" | sudo -E "$RT" login ghcr.io -u "$USER" --password-stdin
           else
-            echo "${{ secrets.CONTAINER_REGISTRY_PASSWORD }}" | $RT login "$REG" -u "${{ secrets.CONTAINER_REGISTRY_USERNAME }}" --password-stdin
+            echo "${{ secrets.CONTAINER_REGISTRY_PASSWORD }}" | sudo -E "$RT" login "$REG" -u "${{ secrets.CONTAINER_REGISTRY_USERNAME }}" --password-stdin
           fi
 
+      # Run build/push as root so UBI and other images with fixed UID/GID layers succeed.
       - name: Build and push image (only if Critical = 0)
         if: steps.critical.outputs.count == '0'
         run: |
@@ -210,14 +204,13 @@ jobs:
             echo "::error::No Containerfile or Dockerfile found in $(pwd)"
             exit 1
           fi
-          $RT build -t "${{ matrix.image }}:compliance" -f "$FILE" .
-          # Podman/Buildah require full registry path when tagging for remote push
+          sudo -E "$RT" build -t "${{ matrix.image }}:compliance" -f "$FILE" .
           FULL_LATEST="$REG/$SUB:latest"
           FULL_TAG2="$REG/$SUB:$TAG2"
-          $RT tag "${{ matrix.image }}:compliance" "$FULL_LATEST"
-          $RT push "$FULL_LATEST"
-          $RT tag "${{ matrix.image }}:compliance" "$FULL_TAG2"
-          $RT push "$FULL_TAG2"
+          sudo -E "$RT" tag "${{ matrix.image }}:compliance" "$FULL_LATEST"
+          sudo -E "$RT" push "$FULL_LATEST"
+          sudo -E "$RT" tag "${{ matrix.image }}:compliance" "$FULL_TAG2"
+          sudo -E "$RT" push "$FULL_TAG2"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
