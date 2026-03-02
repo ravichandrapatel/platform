@@ -83,7 +83,7 @@ Format: newline- or comma-separated list, or a JSON array string.
     repo: ${{ github.repository }}
 ```
 
-A full sample workflow (cron + manual) is in **`.github/drift-check.yml`** in this repo.
+A full sample workflow (cron + manual) is in **`workflows/drift-check/drift-check.yml`** in this repo (sample/testing only; not published to `.github/workflows`).
 
 ---
 

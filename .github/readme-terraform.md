@@ -173,7 +173,7 @@ Terraform does **not** support caching a data source for a fixed time. You can g
 1. **Daily job** runs **with** refresh and updates state (e.g. `terraform apply -refresh-only`). That re-queries all data sources and writes the result into state.
 2. **Other runs** (e.g. PR/push) run **with** `-refresh=false` so they use the state from the last run and do **not** re-query data sources (they use the “cached” values from the daily refresh).
 
-**Optional workflow:** `terraform-refresh-daily.yml` runs on a schedule (e.g. once at 06:00 UTC), runs `terraform apply -refresh-only -auto-approve` per workspace so remote state is updated with fresh data source values. Enable it if you want data sources refreshed only daily.
+**Optional sample workflow:** `workflows/terraform-refresh-daily/terraform-refresh-daily.yml` runs on a schedule (e.g. once at 06:00 UTC), runs `terraform apply -refresh-only -auto-approve` per workspace so remote state is updated with fresh data source values. Copy/publish it into `.github/workflows/` only if you want to run it in GitHub.
 
 **Using the cache in the main workflow:** The workflow uses **`-refresh=false`** on plan when the repository variable `TF_SKIP_REFRESH` is not set to `false`. So by default, PR/push plans use state (no data source API calls). Run the daily refresh workflow (or set `TF_SKIP_REFRESH=false` for a run) to update state. Trade-off: data source changes (e.g. new team in GitHub) are visible only after the next refresh.
 

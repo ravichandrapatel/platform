@@ -1,8 +1,0 @@
-{
-  "inputs": {
-    "component_path": "platform/actions/git-path-filter",
-    "mode": "promote",
-    "version": "1.0.0",
-    "tag_content": "monorepo"
-  }
-}
