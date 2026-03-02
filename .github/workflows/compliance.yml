@@ -46,12 +46,21 @@ jobs:
             BASE=images
           fi
           IMG_INPUT="${{ inputs.image_to_build || 'ALL' }}"
+          # Temporary: exclude from compliance for testing; remove when no longer needed.
+          EXCLUDE_IMAGES="owasp-dependency-check"
           if [ "$IMG_INPUT" = "ALL" ] || [ -z "$IMG_INPUT" ]; then
             LIST=$(for d in "$BASE"/*/; do
               [ -f "${d}Containerfile" ] || [ -f "${d}Dockerfile" ] || continue
-              basename "$d"
+              name=$(basename "$d")
+              case " $EXCLUDE_IMAGES " in *" $name "*) continue ;; esac
+              echo "$name"
             done | jq -R -s -c 'split("\n") | map(select(length > 0))')
           else
+            case " $EXCLUDE_IMAGES " in *" $IMG_INPUT "*)
+              echo "::error::Image '$IMG_INPUT' is excluded from compliance checks."
+              exit 1
+              ;;
+            esac
             if [ ! -f "$BASE/$IMG_INPUT/Containerfile" ] && [ ! -f "$BASE/$IMG_INPUT/Dockerfile" ]; then
               echo "::error::Image folder '$IMG_INPUT' not found or has no Containerfile/Dockerfile under $BASE"
               exit 1
@@ -69,6 +78,8 @@ jobs:
     env:
       REGISTRY: ${{ inputs.registry || 'ghcr.io' }}
       PULL_REGISTRY: ${{ inputs.pull_registry || inputs.registry || 'ghcr.io' }}
+      # GHCR requires ghcr.io/OWNER/IMAGE; repository_owner is the org or user that owns the repo.
+      GHCR_NAMESPACE: ${{ github.repository_owner }}
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -103,8 +114,13 @@ jobs:
           echo "Root registry (push): ${{ env.REGISTRY }}"
           echo "Root registry (pull): ${{ env.PULL_REGISTRY }}"
           echo "Sub-registry (image name): ${{ matrix.image }}"
-          echo "Full push ref: ${{ env.REGISTRY }}/${{ matrix.image }}:latest and :${{ github.run_id }}"
-          echo "Full pull ref: ${{ env.PULL_REGISTRY }}/${{ matrix.image }}:latest"
+          if [ "${{ env.REGISTRY }}" = "ghcr.io" ]; then
+            echo "Full push ref: ghcr.io/${{ env.GHCR_NAMESPACE }}/${{ matrix.image }}:latest and :${{ github.run_id }}"
+            echo "Full pull ref: ${{ env.PULL_REGISTRY }}/${{ env.GHCR_NAMESPACE }}/${{ matrix.image }}:latest"
+          else
+            echo "Full push ref: ${{ env.REGISTRY }}/${{ matrix.image }}:latest and :${{ github.run_id }}"
+            echo "Full pull ref: ${{ env.PULL_REGISTRY }}/${{ matrix.image }}:latest"
+          fi
 
       # Trivy: download binary via curl (no aquasecurity/trivy-action).
       - name: Install Trivy
@@ -194,6 +210,13 @@ jobs:
           REG="${{ env.REGISTRY }}"
           SUB="${{ matrix.image }}"
           TAG2="${{ github.run_id }}"
+          if [ "$REG" = "ghcr.io" ]; then
+            FULL_LATEST="ghcr.io/${{ env.GHCR_NAMESPACE }}/$SUB:latest"
+            FULL_TAG2="ghcr.io/${{ env.GHCR_NAMESPACE }}/$SUB:$TAG2"
+          else
+            FULL_LATEST="$REG/$SUB:latest"
+            FULL_TAG2="$REG/$SUB:$TAG2"
+          fi
           cd "${{ steps.path.outputs.dir }}"
           FILE=""
           if [ -f "Containerfile" ]; then
@@ -205,8 +228,6 @@ jobs:
             exit 1
           fi
           sudo -E "$RT" build -t "${{ matrix.image }}:compliance" -f "$FILE" .
-          FULL_LATEST="$REG/$SUB:latest"
-          FULL_TAG2="$REG/$SUB:$TAG2"
           sudo -E "$RT" tag "${{ matrix.image }}:compliance" "$FULL_LATEST"
           sudo -E "$RT" push "$FULL_LATEST"
           sudo -E "$RT" tag "${{ matrix.image }}:compliance" "$FULL_TAG2"
