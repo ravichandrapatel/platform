@@ -54,7 +54,8 @@ jobs:
             echo "RC Tag verified. Proceeding."
 
             # 4. SemVer gate: ensure new version is greater than existing versions for this component
-            EXISTING_VERSIONS=$(git tag -l "${PATH_NAME}/[0-9]*" | sed -e "s#^${PATH_NAME}/##" | sort -V || true)
+            # Only consider full release tags like path/1.2.3 (exclude RC tags such as path/1.2.3-rc)
+            EXISTING_VERSIONS=$(git tag -l "${PATH_NAME}/[0-9]*.[0-9]*.[0-9]*" | sed -e "s#^${PATH_NAME}/##" | sort -V || true)
             if [[ -n "$EXISTING_VERSIONS" ]]; then
               LATEST_VER=$(echo "$EXISTING_VERSIONS" | tail -n 1)
               if [[ "$LATEST_VER" != "$VER" ]]; then
