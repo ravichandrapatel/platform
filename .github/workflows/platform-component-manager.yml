@@ -43,7 +43,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      workflows: write
 
     steps:
       # --- Official GitHub action only; fetch-depth 0 needed for tag history ---
@@ -55,10 +54,12 @@ jobs:
       - name: Publish workflow to .github/workflows (if workflows path)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_TOKEN: ${{ secrets.COMMIT_TOKEN }}
         run: |
-          if [ -n "${GITHUB_TOKEN:-}" ]; then
+          TOKEN="${COMMIT_TOKEN:-${GITHUB_TOKEN:-}}"
+          if [ -n "${TOKEN:-}" ]; then
             REPO="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -n 's/.*github\.com[:\/]\(.*\)\.git/\1/p')}"
-            [ -n "$REPO" ] && git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+            [ -n "$REPO" ] && git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${REPO}.git"
           fi
           PATH_NAME="${{ github.event.inputs.component_path }}"
           if [ "${{ github.event.inputs.mode }}" != "promote" ]; then
@@ -107,13 +108,15 @@ jobs:
       - name: Execute Tag Flip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_TOKEN: ${{ secrets.COMMIT_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if [ -n "${GITHUB_TOKEN:-}" ]; then
+          TOKEN="${COMMIT_TOKEN:-${GITHUB_TOKEN:-}}"
+          if [ -n "${TOKEN:-}" ]; then
             REPO="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -n 's/.*github\.com[:\/]\(.*\)\.git/\1/p')}"
-            [ -n "$REPO" ] && git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+            [ -n "$REPO" ] && git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${REPO}.git"
           fi
           PATH_NAME="${{ github.event.inputs.component_path }}"
           VER="${{ github.event.inputs.version }}"
