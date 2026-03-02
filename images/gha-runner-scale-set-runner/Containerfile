@@ -115,7 +115,7 @@ RUN chmod +x /usr/bin/entrypoint.sh /usr/bin/startup.sh /usr/bin/update-status
 COPY runner/hooks/job-started.sh runner/hooks/job-completed.sh /etc/arc/hooks/
 COPY runner/hooks/job-started.d runner/hooks/job-completed.d /etc/arc/hooks/
 RUN chmod +x /etc/arc/hooks/job-started.sh /etc/arc/hooks/job-completed.sh \
-    && chmod +x /etc/arc/hooks/job-started.d/* /etc/arc/hooks/job-completed.d/*
+    && for f in /etc/arc/hooks/job-started.d/* /etc/arc/hooks/job-completed.d/*; do [ -f "$$f" ] && chmod +x "$$f"; done
 
 # Runner + k8s hooks under /home/runner, owned by runner:runner (1001:123)
 RUN mkdir -p /home/runner
