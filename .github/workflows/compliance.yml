@@ -37,7 +37,7 @@ jobs:
       matrix: ${{ steps.list.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
-      - name: List image folders (with Containerfile)
+      - name: List image folders (with Containerfile or Dockerfile)
         id: list
         run: |
           if [ -d "platform/images" ]; then
@@ -48,11 +48,12 @@ jobs:
           IMG_INPUT="${{ inputs.image_to_build || 'ALL' }}"
           if [ "$IMG_INPUT" = "ALL" ] || [ -z "$IMG_INPUT" ]; then
             LIST=$(for d in "$BASE"/*/; do
-              [ -f "${d}Containerfile" ] && basename "$d"
+              [ -f "${d}Containerfile" ] || [ -f "${d}Dockerfile" ] || continue
+              basename "$d"
             done | jq -R -s -c 'split("\n") | map(select(length > 0))')
           else
-            if [ ! -f "$BASE/$IMG_INPUT/Containerfile" ]; then
-              echo "::error::Image folder '$IMG_INPUT' not found or has no Containerfile under $BASE"
+            if [ ! -f "$BASE/$IMG_INPUT/Containerfile" ] && [ ! -f "$BASE/$IMG_INPUT/Dockerfile" ]; then
+              echo "::error::Image folder '$IMG_INPUT' not found or has no Containerfile/Dockerfile under $BASE"
               exit 1
             fi
             LIST=$(jq -n -c --arg n "$IMG_INPUT" '[$n]')
@@ -115,10 +116,31 @@ jobs:
       # Trivy: download binary via curl (no aquasecurity/trivy-action).
       - name: Install Trivy
         run: |
-          V=$(curl -sSfL https://api.github.com/repos/aquasecurity/trivy/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')
-          curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${V}/trivy_${V}_Linux-64bit.tar.gz" | sudo tar xz -C /usr/local/bin trivy
+          V=$(curl -sSfL https://api.github.com/repos/aquasecurity/trivy/releases/latest \
+            | jq -r .tag_name | sed 's/^v//')
+
+          ARCH="${{ runner.arch }}"
+          case "$ARCH" in
+            X64)   T_ARCH="Linux-64bit" ;;
+            ARM64) T_ARCH="Linux-ARM64" ;;
+            *)
+              echo "::error::Unsupported runner.arch: $ARCH"
+              exit 1
+              ;;
+          esac
+
+          curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${V}/trivy_${V}_${T_ARCH}.tar.gz" \
+            | sudo tar xz -C /usr/local/bin trivy
           chmod +x /usr/local/bin/trivy
           trivy --version
+
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('platform/.github/workflows/compliance.yml') }}
+          restore-keys: |
+            trivy-db-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Trivy config
         run: |
@@ -157,7 +179,15 @@ jobs:
           RT="${{ steps.runtime.outputs.runtime }}"
           REG="${{ env.REGISTRY }}"
           if [ "$REG" = "ghcr.io" ]; then
-            echo "${{ secrets.GITHUB_TOKEN }}" | $RT login ghcr.io -u ${{ github.actor }} --password-stdin
+            # Prefer service account for scheduled runs to avoid tying automation to a human actor.
+            if [ "${{ github.event_name }}" = "schedule" ] && [ -n "${{ secrets.GHCR_SERVICE_USERNAME }}" ] && [ -n "${{ secrets.GHCR_SERVICE_TOKEN }}" ]; then
+              USER="${{ secrets.GHCR_SERVICE_USERNAME }}"
+              PASS="${{ secrets.GHCR_SERVICE_TOKEN }}"
+            else
+              USER="${{ github.actor }}"
+              PASS="${{ secrets.GITHUB_TOKEN }}"
+            fi
+            echo "$PASS" | $RT login ghcr.io -u "$USER" --password-stdin
           else
             echo "${{ secrets.CONTAINER_REGISTRY_PASSWORD }}" | $RT login "$REG" -u "${{ secrets.CONTAINER_REGISTRY_USERNAME }}" --password-stdin
           fi
@@ -191,7 +221,8 @@ jobs:
   # Restore trivy-results into image dirs, run update_readme.py (compliance.md + readme badges), commit [skip ci].
   report:
     needs: [discovery, compliance]
-    if: always() && needs.discovery.outputs.matrix != '[]' && (needs.compliance.result == 'success' || needs.compliance.result == 'failure')
+    # Run report whenever the workflow wasn't explicitly cancelled and discovery produced work.
+    if: ${{ !cancelled() && needs.discovery.outputs.matrix != '[]' }}
     runs-on: ubuntu-latest
     # contents: write for push. Use COMMIT_TOKEN (PAT) secret if branch protection blocks GITHUB_TOKEN.
     permissions:
