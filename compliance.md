@@ -1,6 +1,6 @@
 # Compliance
 
-<!-- COMPLIANCE_BADGE -->
+[![Compliance](https://github.com/ravichandrapatel/platform/actions/workflows/compliance.yml/badge.svg)](https://github.com/ravichandrapatel/platform/actions/workflows/compliance.yml)
 <!-- Badge is inserted by update_readme.py when run with --repo owner/repo -->
 
 ## Status

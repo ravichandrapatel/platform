@@ -78,7 +78,8 @@ The compliance workflow and README table will pick it up automatically.
 ### Compliance status
 
 <!-- COMPLIANCE_TABLE_START -->
-<!-- Badge and link inserted by update_readme.py (run with --repo owner/repo for badge) -->
+[![Compliance](https://github.com/ravichandrapatel/platform/actions/workflows/compliance.yml/badge.svg)](https://github.com/ravichandrapatel/platform/actions/workflows/compliance.yml)
+
 Full table: [compliance.md](compliance.md)
 <!-- COMPLIANCE_TABLE_END -->
 
