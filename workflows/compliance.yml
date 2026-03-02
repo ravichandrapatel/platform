@@ -2,7 +2,7 @@
 # Compliance
 # =============================================================================
 # Trivy config+fs scan per image (images/ with Containerfile); optional build+push
-# (Podman/Buildah) only when Critical=0; updates compliance.md and README badges.
+# (Podman/Buildah) only when Critical=0; updates compliance.md and readme badges.
 # Schedule: first Sunday of month; manual with image_to_build (ALL or single name).
 # Root registry same for all; sub-registry = image folder name. Tags: latest + run_id.
 #
@@ -188,7 +188,7 @@ jobs:
           name: trivy-${{ matrix.image }}
           path: ${{ steps.path.outputs.dir }}/trivy-results.json
 
-  # Restore trivy-results into image dirs, run update_readme.py (compliance.md + README badges), commit [skip ci].
+  # Restore trivy-results into image dirs, run update_readme.py (compliance.md + readme badges), commit [skip ci].
   report:
     needs: [discovery, compliance]
     if: always() && needs.discovery.outputs.matrix != '[]' && (needs.compliance.result == 'success' || needs.compliance.result == 'failure')
@@ -219,8 +219,8 @@ jobs:
             fi
           done
 
-      # update_readme.py: upsert table in compliance.md, badge + link in README; --repo for badge URL.
-      - name: Update compliance and README with Python script
+      # update_readme.py: upsert table in compliance.md, badge + link in readme; --repo for badge URL.
+      - name: Update compliance and readme with Python script
         run: |
           REPO="${{ github.repository }}"
           if [ -f "platform/scripts/update_readme.py" ]; then
@@ -229,11 +229,11 @@ jobs:
             python3 scripts/update_readme.py --repo "$REPO"
           fi
 
-      - name: Commit and push compliance + README [skip ci]
+      - name: Commit and push compliance + readme [skip ci]
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          for f in README.md platform/README.md compliance.md platform/compliance.md; do
+          for f in readme.md platform/readme.md compliance.md platform/compliance.md; do
             [ -f "$f" ] && ! git diff --quiet "$f" && git add "$f"
           done
           git diff --staged --quiet && echo "No changes" && exit 0

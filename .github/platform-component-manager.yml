@@ -5,7 +5,7 @@
 # - Actions: component_path = e.g. platform/actions/my-action.
 # - Workflows: component_path = workflows/<name> (folder). On promote, copies
 #   workflows/<name>/* to .github/workflows/, then tags. Tag = only that workflow.
-# See README-platform-component-manager.md.
+# See readme-platform-component-manager.md.
 # ACTIONS: Only actions/checkout@v4. Contents: write for tags and workflow publish.
 # =============================================================================
 

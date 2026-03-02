@@ -1,0 +1,36 @@
+# Custom act runner image – no public/third-party act image.
+# Used by platform/act/run.sh with -P ubuntu-latest=act-runner:latest --pull=false.
+# Base: Ubuntu 22.04 (no catthehacker/ubuntu or other public act image).
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    git \
+    gnupg \
+    jq \
+    python3 \
+    python3-pip \
+    python3-venv \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Buildah for workflows that build images (e.g. dependency-check-nightly)
+RUN apt-get update -qq && apt-get install -y --no-install-recommends buildah \
+    && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI (optional; used by platform-component-manager and similar)
+RUN curl -sSfL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update -qq && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Act runs steps as root; ensure git and basic env work
+RUN git config --global --add safe.directory '*'
+
+WORKDIR /workspace
+# act mounts the repo here; no default entrypoint so act can run its steps
+CMD ["/bin/bash"]

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Janitor Bot: scan (and optionally cleanup) stale branches and PRs.
-Supports: one repo, multiple repos, entire org, or repos filtered by topic (tag).
-Configuration is read from environment variables (set by GitHub Actions from workflow inputs).
-Uses only stdlib: os, json, urllib.request, re, argparse, datetime, time.
-Handles API throttling (rate limits, retry with backoff) and batches work where possible.
+FILE_NAME: janitor.py
+DESCRIPTION: Scan and optionally cleanup stale branches, PRs, artifacts, packages.
+  Supports one repo, multiple repos, org, or topic filter. Config from env (GitHub Action inputs). Stdlib only.
+VERSION: 1.0.0
+EXIT_CODES: 0 = success, 1 = error (config, API, or runtime)
+AUTHORS: Platform / DevOps
 """
 
 from __future__ import annotations
@@ -28,7 +29,8 @@ SCOPE_TOPIC = "topic"
 
 
 def _parse_repo_spec(spec: str, default_owner: str) -> tuple[str, str]:
-    """Return (owner, repo_name). spec is either 'repo-name' or 'owner/repo-name'."""
+    """INTENT: Return (owner, repo_name). spec is 'repo-name' or 'owner/repo-name'.
+    INPUT: spec (str), default_owner (str). OUTPUT: tuple[str, str]. SIDE_EFFECTS: None."""
     s = spec.strip()
     if "/" in s:
         parts = s.split("/", 1)
@@ -37,10 +39,8 @@ def _parse_repo_spec(spec: str, default_owner: str) -> tuple[str, str]:
 
 
 def get_config() -> dict:
-    """
-    Parse configuration from environment variables (GitHub Action inputs mapped to env).
-    Converts string inputs to correct types. Compiles BRANCH_EXCLUDE_REGEX for performance.
-    """
+    """INTENT: Parse configuration from env (GitHub Action inputs); compile regex and types.
+    INPUT: None (reads os.environ). OUTPUT: dict. SIDE_EFFECTS: Reads os.environ."""
     branch_stale = os.getenv("BRANCH_STALE_DAYS", "45")
     pr_stale = os.getenv("PR_STALE_DAYS", "30")
     pkg_keep = os.getenv("PKG_KEEP_COUNT", "5")
@@ -120,10 +120,8 @@ def get_config() -> dict:
 # ---------------------------------------------------------------------------
 
 class RateLimiter:
-    """
-    Tracks GitHub API rate limit from response headers and waits when needed.
-    Uses X-RateLimit-Remaining, X-RateLimit-Reset; respects Retry-After on 429/403.
-    """
+    """ROLE: Service. INTENT: Track GitHub API rate limit from headers; wait when low; respect Retry-After.
+    INPUT: min_remaining (optional). OUTPUT: N/A. SIDE_EFFECTS: time.sleep when throttled."""
     DEFAULT_MIN_REMAINING = 20
     MAX_RETRIES = 4
     RETRY_BACKOFF_BASE = 60
@@ -733,6 +731,8 @@ class ScanRunner:
 
 
 def main() -> None:
+    """INTENT: Parse args, load config, run scan or cleanup. INPUT: None (argv). OUTPUT: None. SIDE_EFFECTS: Network, disk, stdout."""
+    # _log("[T-01] Starting Janitor Bot")
     parser = argparse.ArgumentParser(description="Janitor Bot: scan or cleanup stale branches/PRs")
     parser.add_argument("--mode", choices=["scan", "cleanup"], required=True)
     args = parser.parse_args()

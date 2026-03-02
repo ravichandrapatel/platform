@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: master-clock
+  namespace: master-clock
+  labels:
+    app.kubernetes.io/name: master-clock
+    app.kubernetes.io/component: trigger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: master-clock
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: master-clock
+        app.kubernetes.io/component: trigger
+    spec:
+      containers:
+        - name: trigger
+          image: image-registry.openshift-image-registry.svc:5000/master-clock/trigger:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - /app/trigger_app.py
+          ports:
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: GITHUB_API_URL
+              value: "https://api.github.com"
+            - name: GITHUB_REF_NAME
+              value: main
+            - name: HEALTH_PORT
+              value: "8080"
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/config
+              readOnly: true
+            - name: github-token
+              mountPath: /etc/github/token
+              subPath: password
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: master-clock-repos
+        - name: github-token
+          secret:
+            secretName: github-token
+            optional: false
+      restartPolicy: Always
+---
+# Optional: use a custom Dockerfile that copies trigger_app.py to /app
+# For in-cluster build: use a minimal Python image and COPY trigger_app.py /app/
+# Example Dockerfile (place in same dir or reference from CI):
+#   FROM python:3.11-slim
+#   COPY trigger_app.py /app/
+#   WORKDIR /app
+#   CMD ["python3", "trigger_app.py"]

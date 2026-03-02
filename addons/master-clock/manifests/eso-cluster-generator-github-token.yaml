@@ -1,0 +1,18 @@
+# ClusterGenerator for GitHub App installation token. Generates a token on each refresh;
+# ClusterExternalSecret ocp-token-sync will use this to push the token to namespaces with
+# label type: ci-pipeline (Tekton-style basic-auth, username: x-access-token).
+# Requires: Secret "github-app-pem" with key "key" (PEM content) in every target namespace.
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: ClusterGenerator
+metadata:
+  name: github-token-generator
+spec:
+  kind: GithubAccessToken
+  generator:
+    appID: "REPLACE_APP_ID"
+    installID: "REPLACE_INSTALLATION_ID"
+    auth:
+      privateKey:
+        secretRef:
+          name: github-app-pem
+          key: key

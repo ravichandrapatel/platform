@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - manifests/namespace.yaml
+  - manifests/configmap-repos.yaml
+  - manifests/deployment.yaml
+  # ESO: uncomment and configure after installing External Secrets Operator
+  # - manifests/eso-github-app-pem-secret.yaml
+  # - manifests/eso-cluster-generator-github-token.yaml
+  # - manifests/eso-cluster-external-secret-ocp-token-sync.yaml

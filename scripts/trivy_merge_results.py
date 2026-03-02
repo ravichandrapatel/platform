@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
-Merge Trivy config + fs JSON outputs into trivy-results.json with scan_date.
-Optionally print Critical vulnerability count from trivy-results.json (for CI).
-Uses only stdlib: json, os, argparse, datetime.
+FILE_NAME: trivy_merge_results.py
+DESCRIPTION: Merge Trivy config + fs JSON outputs into trivy-results.json with scan_date.
+  Optionally print Critical vulnerability count from trivy-results.json (for CI). Stdlib only.
+VERSION: 1.0.0
+EXIT_CODES: 0 = success, non-zero on script failure (e.g. I/O error)
+AUTHORS: Platform / DevOps
 """
 from __future__ import annotations
 
@@ -13,10 +16,9 @@ from datetime import datetime
 
 
 def merge_results(dir_path: str, scan_date: str | None = None) -> None:
-    """Read trivy-config.json and trivy-fs.json from dir_path, write trivy-results.json.
-    Trivy may not create one of the files (e.g. if the folder is empty); we handle missing
-    files via os.path.isfile and merge whatever exists. Write only if at least one exists.
-    """
+    """INTENT: Read trivy-config.json and trivy-fs.json from dir_path, merge into trivy-results.json.
+    INPUT: dir_path (str), scan_date (str | None). OUTPUT: None. SIDE_EFFECTS: Disk (read/write JSON)."""
+    # _log("[T-01] Merging Trivy results")
     if scan_date is None:
         scan_date = datetime.utcnow().strftime("%Y-%m-%d")
     cfg: dict = {}
@@ -39,7 +41,7 @@ def merge_results(dir_path: str, scan_date: str | None = None) -> None:
 
 
 def count_critical(dir_path: str) -> int:
-    """Return number of CRITICAL vulnerabilities in trivy-results.json."""
+    """INTENT: Return number of CRITICAL vulnerabilities in trivy-results.json. INPUT: dir_path (str). OUTPUT: int (-1 if file missing). SIDE_EFFECTS: Disk read."""
     path = os.path.join(dir_path, "trivy-results.json")
     if not os.path.isfile(path):
         return -1
@@ -58,6 +60,8 @@ def count_critical(dir_path: str) -> int:
 
 
 def main() -> None:
+    """INTENT: Parse args, merge Trivy results or print Critical count. INPUT: None (argv). OUTPUT: None. SIDE_EFFECTS: Disk, stdout."""
+    # _log("[T-01] Starting trivy merge")
     parser = argparse.ArgumentParser(description="Merge Trivy results or print Critical count")
     parser.add_argument("--dir", default=".", help="Directory containing trivy-*.json (default: cwd)")
     parser.add_argument("--scan-date", help="Scan date YYYY-MM-DD (default: today UTC)")

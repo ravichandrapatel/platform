@@ -1,0 +1,82 @@
+name: 'Terraform Drift Auditor'
+description: 'Detect infrastructure drift across many Terraform workspaces (single S3 backend) in parallel on one runner. Creates/updates one GitHub Issue "Infrastructure Drift Report".'
+inputs:
+  working_dir:
+    description: 'Terraform working directory (repo root or subdir, e.g. . or terraform)'
+    required: false
+    default: '.'
+  vars_folder:
+    description: 'Folder containing *.tfvars (relative to working_dir), e.g. envs or terraform/envs'
+    required: true
+  max_parallel:
+    description: 'Max parallel terraform plans (1-10)'
+    required: false
+    default: '10'
+  backend_config:
+    description: 'Optional path to backend config file (relative to working_dir)'
+    required: false
+    default: ''
+  terraform_version:
+    description: 'Terraform version for setup-terraform'
+    required: false
+    default: '1.9.0'
+  github_token:
+    description: 'Token for GitHub API (create/update/close drift issue)' 
+    required: false
+    default: ${{ github.token }}
+  repo:
+    description: 'Owner/repo for drift issue (default: current repository)'
+    required: false
+    default: ${{ github.repository }}
+  init_timeout:
+    description: 'Timeout in seconds for terraform init (default 300)'
+    required: false
+    default: '300'
+  plan_timeout:
+    description: 'Timeout in seconds for terraform plan (default 600); increase for large/refresh-heavy runs'
+    required: false
+    default: '600'
+  exclude:
+    description: 'Expected drift patterns to exclude from drift count. Newline- or comma-separated, or JSON array. Each pattern matches if resource address contains it. Use "workspace:substring" to scope to one workspace.'
+    required: false
+    default: ''
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform_version }}
+
+    - name: Run Terraform Drift Auditor
+      id: drift
+      run: |
+        set -e
+        ARGS=(
+          --working-dir "${{ inputs.working_dir }}"
+          --vars-folder "${{ inputs.vars_folder }}"
+          --max-parallel "${{ inputs.max_parallel }}"
+        )
+        [ -n "${{ inputs.backend_config }}" ] && ARGS+=(--backend-config "${{ inputs.backend_config }}")
+        [ -n "${{ inputs.github_token }}" ] && ARGS+=(--github-token "${{ inputs.github_token }}")
+        [ -n "${{ inputs.repo }}" ] && ARGS+=(--repo "${{ inputs.repo }}")
+        ARGS+=(--init-timeout "${{ inputs.init_timeout }}" --plan-timeout "${{ inputs.plan_timeout }}")
+        [ -n "${{ inputs.exclude }}" ] && ARGS+=(--exclude "${{ inputs.exclude }}")
+        python3 "${{ github.action_path }}/drift_auditor.py" "${ARGS[@]}"
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+        GITHUB_API_URL: ${{ github.api_url }}
+        TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform.d/plugin-cache
+
+    - name: Upload drift report artifact
+      if: always() && hashFiles('drift-report.md') != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: drift-report
+        path: drift-report.md

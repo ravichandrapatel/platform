@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: master-clock
+  labels:
+    app.kubernetes.io/name: master-clock
+    type: ci-pipeline  # So ocp-token-sync ClusterExternalSecret deploys the GitHub token here

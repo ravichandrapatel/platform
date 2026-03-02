@@ -1,0 +1,44 @@
+name: 'PR Bot'
+description: 'Create or re-use a pull request for a source branch on a target repository (prbot, zero-dependency).'
+inputs:
+  repo:
+    description: 'Target repository (owner/repo or name). When name-only, owner defaults to github.repository_owner.'
+    required: true
+    default: ${{ github.repository }}
+  title:
+    description: 'Pull request title.'
+    required: true
+  source_branch:
+    description: 'Head for the PR: branch name (same-repo) or owner:branch (cross-repo/fork).'
+    required: true
+  target_branch:
+    description: 'Target branch name (base) to open the PR against.'
+    required: false
+    default: 'main'
+  payload:
+    description: 'Optional PR body payload; standard footer is always appended.'
+    required: false
+    default: ''
+  github_token:
+    description: 'Token for GitHub API (e.g. GITHUB_TOKEN or PAT with repo scope).'
+    required: true
+    default: ${{ github.token }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Run PR Bot
+      id: prbot
+      run: |
+        python3 "${{ github.action_path }}/prbot.py" \
+          --repo "${{ inputs.repo }}" \
+          --title "${{ inputs.title }}" \
+          --source-branch "${{ inputs.source_branch }}" \
+          --target-branch "${{ inputs.target_branch }}"
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        PRBOT_PAYLOAD: ${{ inputs.payload }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+        GITHUB_API_URL: ${{ github.api_url }}
+        # All console output from prbot.py is prefixed with [PROJECT-PRBOT] and debug codes.

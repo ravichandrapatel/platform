@@ -1,0 +1,18 @@
+# Example repos.json for Master Clock. Replace with your workflows and intervals.
+# Schema: {"app-name": {"owner", "repo", "workflow_id", "interval_seconds", optional: "ref", "inputs"}}
+# workflow_id: filename (e.g. drift-check.yml) or numeric ID. ref: branch/tag for dispatch (default: main or GITHUB_REF_NAME).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: master-clock-repos
+  namespace: master-clock
+data:
+  repos.json: |
+    {
+      "drift-audit": {
+        "owner": "my-org",
+        "repo": "my-repo",
+        "workflow_id": "drift-check.yml",
+        "interval_seconds": 900
+      }
+    }

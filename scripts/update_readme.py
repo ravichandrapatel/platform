@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Compliance updater (upsert mode). Uses only stdlib: os, json, re, tempfile, argparse.
-- Writes the full compliance table to compliance.md (with status badge when --repo is set).
-- Updates README.md with a status badge and link to compliance.md.
-- Table: load existing between markers, merge scan data from trivy-results.json, write via temp file.
+FILE_NAME: update_readme.py
+DESCRIPTION: Compliance updater (upsert mode). Writes compliance table to compliance.md (with optional badge);
+  updates readme.md with badge and link. Loads table between markers, merges trivy-results.json, writes via temp file. Stdlib only.
+VERSION: 1.0.0
+EXIT_CODES: 0 = success, non-zero on missing markers or I/O error
+AUTHORS: Platform / DevOps
 """
 from __future__ import annotations
 
@@ -19,23 +21,23 @@ BADGE_MARKER = "<!-- COMPLIANCE_BADGE -->"
 
 
 def find_root() -> str:
-    """Root directory that contains images/ and README.md (platform root)."""
+    """INTENT: Return platform root directory (contains images/ and readme.md). INPUT: None. OUTPUT: str. SIDE_EFFECTS: Disk (isdir/isfile)."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     root = os.path.dirname(script_dir)
     if os.path.isdir(os.path.join(root, "images")) and os.path.isfile(
-        os.path.join(root, "README.md")
+        os.path.join(root, "readme.md")
     ):
         return root
     parent = os.path.dirname(root)
     if os.path.isdir(os.path.join(parent, "images")) and os.path.isfile(
-        os.path.join(parent, "README.md")
+        os.path.join(parent, "readme.md")
     ):
         return parent
     return root
 
 
 def images_with_trivy_results(root: str) -> list[str]:
-    """Return list of image names that have trivy-results.json (fresh scan data)."""
+    """INTENT: Return list of image names under images/ that have trivy-results.json. INPUT: root (str). OUTPUT: list[str]. SIDE_EFFECTS: Disk (listdir, isfile)."""
     images_dir = os.path.join(root, "images")
     if not os.path.isdir(images_dir):
         return []
@@ -48,7 +50,7 @@ def images_with_trivy_results(root: str) -> list[str]:
 
 
 def count_vulnerabilities(data: dict) -> tuple[int, int, int]:
-    """Return (critical, high, medium) from Trivy-style JSON."""
+    """INTENT: Return (critical, high, medium) counts from Trivy-style JSON. INPUT: data (dict). OUTPUT: tuple[int,int,int]. SIDE_EFFECTS: None."""
     c, h, m = 0, 0, 0
     results = data.get("Results") or []
     for r in results:
@@ -64,10 +66,7 @@ def count_vulnerabilities(data: dict) -> tuple[int, int, int]:
 
 
 def row_from_trivy_results(root: str, image_name: str) -> dict[str, str] | None:
-    """
-    Read images/<image_name>/trivy-results.json and return a row dict:
-    {image_name, status, vuln, date}. Returns None if file missing or invalid.
-    """
+    """INTENT: Read trivy-results.json for image and return row dict (image_name, status, vuln, date). INPUT: root, image_name (str). OUTPUT: dict | None. SIDE_EFFECTS: Disk read."""
     path = os.path.join(root, "images", image_name, "trivy-results.json")
     if not os.path.isfile(path):
         return None
@@ -98,10 +97,8 @@ def row_from_trivy_results(root: str, image_name: str) -> dict[str, str] | None:
 
 
 def parse_table_from_markdown(table_text: str) -> list[dict[str, str]]:
-    """
-    Parse a Markdown table into a list of row dicts.
-    Expects columns: Image Name | Status | Vulnerabilities (C/H/M) | Last Scan Date
-    """
+    """INTENT: Parse Markdown table into list of row dicts (Image Name | Status | Vulnerabilities | Last Scan Date).
+    INPUT: table_text (str). OUTPUT: list[dict]. SIDE_EFFECTS: None."""
     rows = []
     lines = [ln.strip() for ln in table_text.strip().splitlines() if ln.strip()]
     for i, line in enumerate(lines):
@@ -124,7 +121,7 @@ def parse_table_from_markdown(table_text: str) -> list[dict[str, str]]:
 
 
 def table_to_markdown(rows: list[dict[str, str]]) -> str:
-    """Convert list of row dicts to Markdown table."""
+    """INTENT: Convert list of row dicts to Markdown table string. INPUT: rows (list[dict]). OUTPUT: str. SIDE_EFFECTS: None."""
     header = "| Image Name | Status | Vulnerabilities (C/H/M) | Last Scan Date |"
     sep = "|------------|--------|--------------------------|----------------|"
     body = []
@@ -134,7 +131,7 @@ def table_to_markdown(rows: list[dict[str, str]]) -> str:
 
 
 def _is_placeholder_row(row: dict[str, str]) -> bool:
-    """True if this looks like a placeholder (e.g. 'Run the workflow...')."""
+    """INTENT: Return True if row looks like a placeholder (e.g. 'Run the workflow...'). INPUT: row (dict). OUTPUT: bool. SIDE_EFFECTS: None."""
     name = (row.get("image_name") or "").strip()
     return name.startswith("*") or "run the" in name.lower() or name == "-"
 
@@ -143,11 +140,8 @@ def upsert_rows(
     existing_rows: list[dict[str, str]],
     new_rows_by_name: dict[str, dict[str, str]],
 ) -> list[dict[str, str]]:
-    """
-    Merge new data into existing rows. For each existing row, if we have new
-    data for that image_name, replace the row; otherwise keep it (skip placeholder
-    rows when we have real data). Then append any new image that wasn't in the table.
-    """
+    """INTENT: Merge new scan rows into existing; replace by image_name, skip placeholders when we have real data, append new images.
+    INPUT: existing_rows, new_rows_by_name. OUTPUT: list[dict]. SIDE_EFFECTS: None."""
     seen = set()
     out = []
     have_new = bool(new_rows_by_name)
@@ -169,7 +163,7 @@ def upsert_rows(
 def read_table_between_markers(
     content: str, start_marker: str, end_marker: str
 ) -> tuple[str, str, str]:
-    """Return (content_before, table_content, content_after). Raises if markers not found."""
+    """INTENT: Split content into (before, table_block, after) by markers. INPUT: content, start_marker, end_marker. OUTPUT: tuple[str,str,str]. Raises if markers missing. SIDE_EFFECTS: None."""
     pattern = re.compile(
         re.escape(start_marker) + r"\s*(.*?)\s*" + re.escape(end_marker),
         re.DOTALL,
@@ -186,13 +180,13 @@ def read_table_between_markers(
 
 
 def badge_markdown(repo: str) -> str:
-    """Return status badge markdown for the compliance workflow (repo = owner/repo)."""
+    """INTENT: Return status badge markdown for compliance workflow. INPUT: repo (str, owner/repo). OUTPUT: str. SIDE_EFFECTS: None."""
     base = f"https://github.com/{repo}/actions/workflows/compliance.yml"
     return f"[![Compliance]({base}/badge.svg)]({base})"
 
 
 def safe_write(path: str, content: str) -> None:
-    """Write content to path via a temp file then replace."""
+    """INTENT: Write content to path atomically (temp file then replace). INPUT: path, content (str). OUTPUT: None. SIDE_EFFECTS: Disk. Raises on error."""
     fd, tmp_path = tempfile.mkstemp(
         prefix="compliance_", suffix=".md", dir=os.path.dirname(path)
     )
@@ -201,6 +195,7 @@ def safe_write(path: str, content: str) -> None:
             f.write(content)
         os.replace(tmp_path, path)
     except Exception:
+        # _log("[ERR-T-01] safe_write failed, cleaning temp file")
         if os.path.isfile(tmp_path):
             try:
                 os.unlink(tmp_path)
@@ -210,10 +205,9 @@ def safe_write(path: str, content: str) -> None:
 
 
 def update_compliance_md(root: str, repo: str | None) -> None:
-    """
-    Write or update compliance.md: badge (if repo) + full table between markers.
-    Load existing table from compliance.md, upsert scan data, write back.
-    """
+    """INTENT: Write or update compliance.md (badge if repo, full table between markers); upsert scan data from trivy-results.json.
+    INPUT: root (str), repo (str | None). OUTPUT: None. SIDE_EFFECTS: Disk read/write."""
+    # _log("[T-01] Updating compliance.md")
     compliance_path = os.path.join(root, "compliance.md")
     if os.path.isfile(compliance_path):
         with open(compliance_path, encoding="utf-8") as f:
@@ -247,15 +241,14 @@ def update_compliance_md(root: str, repo: str | None) -> None:
 
     merged = upsert_rows(existing_rows, new_rows_by_name)
     new_table = table_to_markdown(merged)
+    # _log("[T-02] Writing compliance.md")
     new_content = before + START_MARKER + "\n" + new_table + "\n" + END_MARKER + after
     safe_write(compliance_path, new_content)
 
 
 def update_readme_section(root: str, repo: str | None) -> None:
-    """
-    Replace the compliance section in README.md with badge + link to compliance.md.
-    """
-    readme_path = os.path.join(root, "README.md")
+    """INTENT: Replace compliance section in readme.md with badge + link to compliance.md. INPUT: root, repo (str | None). OUTPUT: None. SIDE_EFFECTS: Disk read/write."""
+    readme_path = os.path.join(root, "readme.md")
     with open(readme_path, encoding="utf-8") as f:
         content = f.read()
 
@@ -273,6 +266,8 @@ def update_readme_section(root: str, repo: str | None) -> None:
 
 
 def main() -> None:
+    """INTENT: Parse args, find root, update compliance.md and readme section. INPUT: None (argv). OUTPUT: None. SIDE_EFFECTS: Disk, stdout."""
+    # _log("[T-01] Starting compliance updater")
     parser = argparse.ArgumentParser(description="Update compliance table and badges")
     parser.add_argument(
         "--repo",
@@ -284,7 +279,7 @@ def main() -> None:
     root = find_root()
     update_compliance_md(root, args.repo)
     update_readme_section(root, args.repo)
-    print("Updated compliance.md and README (upsert + badges).")
+    print("Updated compliance.md and readme (upsert + badges).")
 
 
 if __name__ == "__main__":

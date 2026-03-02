@@ -1,12 +1,9 @@
-"""git-change-detector main
-
-This implements path-filter semantics similar to dorny/paths-filter:
-- Filter spec is a YAML mapping of keys -> list of glob patterns.
-- Patterns starting with "!" are exclusions (negations) applied to the key.
-- Matching uses fnmatch semantics on POSIX-style paths (forward slashes).
-
-The script writes `changes.json` with the structure:
-  { key: {"has_changes": bool, "files": [list of files]} }
+"""
+FILE_NAME: main.py
+DESCRIPTION: Path-filter semantics (like dorny/paths-filter): YAML key -> glob patterns; "!" for exclusions. Writes changes.json and GITHUB_OUTPUT with has_changes and files per key.
+VERSION: 1.0.0
+EXIT_CODES: 0 = success, 1 = error (config, git, or I/O)
+AUTHORS: Platform / DevOps
 """
 
 from __future__ import annotations
@@ -37,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
+    """INTENT: Parse CLI (base-ref, source-ref, filter-spec). INPUT: None (argv). OUTPUT: argparse.Namespace. SIDE_EFFECTS: None."""
     p = argparse.ArgumentParser(description="Detect file changes using path-filter style patterns.")
     p.add_argument("--base-ref", required=True, help="Base ref (e.g. main)")
     p.add_argument("--source-ref", required=True, help="Source/head ref (e.g. feature/foo)")
@@ -46,7 +43,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_git_cmd(args: List[str], ignore_error: bool = False) -> str:
-    """Helper to run git commands with logging and error handling."""
+    """INTENT: Run git command with logging and optional ignore_error. INPUT: args (List[str]), ignore_error (bool). OUTPUT: str (stdout). SIDE_EFFECTS: subprocess, stderr on error."""
     cmd_str = " ".join(args)
     logger.info(f"Running git command: {cmd_str}")
     
@@ -58,12 +55,13 @@ def run_git_cmd(args: List[str], ignore_error: bool = False) -> str:
         if ignore_error:
             logger.warning(f"Git command failed (ignoring): {e.stderr.strip()}")
             return ""
+        # logger.error("[ERR-T-01] Git command failed")
         logger.error(f"Git command failed: {e.stderr.strip()}")
         raise e
 
 
 def load_filter_config(filter_spec: str) -> Dict[str, List[str]]:
-    """Load the YAML filter configuration from a file or string."""
+    """INTENT: Load YAML filter config from file path or string. INPUT: filter_spec (str). OUTPUT: Dict[str, List[str]]. SIDE_EFFECTS: Disk read if file."""
     logger.info("Loading filter configuration...")
     
     if os.path.exists(filter_spec):
@@ -89,7 +87,7 @@ def load_filter_config(filter_spec: str) -> Dict[str, List[str]]:
 
 
 def fetch_refs(base_ref: str, source_ref: str) -> None:
-    """Fetch the necessary git history to compare branches."""
+    """INTENT: Fetch git history for base and source refs. INPUT: base_ref, source_ref (str). OUTPUT: None. SIDE_EFFECTS: subprocess (git fetch)."""
     base_ref = base_ref.replace("origin/", "")
     source_ref = source_ref.replace("origin/", "")
     logger.info(f"Fetching history for '{base_ref}' and '{source_ref}'...")
@@ -104,7 +102,7 @@ def fetch_refs(base_ref: str, source_ref: str) -> None:
 
 
 def get_changed_files(base_ref: str, source_ref: str) -> List[str]:
-    """Run git diff to find files changed between base and source."""
+    """INTENT: Run git diff to list files changed between base and source. INPUT: base_ref, source_ref. OUTPUT: List[str]. SIDE_EFFECTS: subprocess."""
     base_ref = base_ref.replace("origin/", "")
     source_ref = source_ref.replace("origin/", "")
     # Prefer origin/ refs (standard fetch); fallback to local refs if diff fails (e.g. after fallback fetch)
@@ -132,10 +130,7 @@ def get_changed_files(base_ref: str, source_ref: str) -> List[str]:
 
 
 def match_patterns_for_key(patterns: List[str], files: List[str]) -> List[str]:
-    """
-    Check which files match the given list of patterns.
-    Handles '!' for exclusions (e.g., '!src/test/**').
-    """
+    """INTENT: Return files matching patterns; "!" prefix = exclusion. INPUT: patterns, files (List[str]). OUTPUT: List[str]. SIDE_EFFECTS: None."""
     matched: List[str] = []
     for pat in patterns:
         if not isinstance(pat, str):
@@ -164,7 +159,7 @@ def match_patterns_for_key(patterns: List[str], files: List[str]) -> List[str]:
 
 
 def process_changes(filter_config: Dict[str, List[str]], changed_files: List[str]) -> Dict[str, Any]:
-    """Group changed files based on the filter configuration."""
+    """INTENT: Group changed files by filter keys; add _unmatched. INPUT: filter_config, changed_files. OUTPUT: Dict. SIDE_EFFECTS: None."""
     output: Dict[str, Any] = {}
     all_matched = set()
 
@@ -191,9 +186,11 @@ def process_changes(filter_config: Dict[str, List[str]], changed_files: List[str
 
 
 def main() -> int:
+    """INTENT: Load config, fetch refs, diff, match patterns, write changes.json and GITHUB_OUTPUT. INPUT: None. OUTPUT: int exit code. SIDE_EFFECTS: Disk, subprocess, env."""
     try:
+        # logger.info("[T-01] Parsing args")
         args = parse_args()
-        
+
         # 1. Load Configuration
         filter_conf = load_filter_config(args.filter_spec)
 
@@ -228,6 +225,7 @@ def main() -> int:
         return EXIT_CODE_SUCCESS
 
     except Exception as e:
+        # logger.error("[ERR-T-02] Unexpected error in main")
         logger.error(f"An unexpected error occurred: {e}", exc_info=True)
         return EXIT_CODE_ERROR
 

@@ -9,7 +9,7 @@
 # - Push to main: only via PR merge (no direct push). Auto-triggers full pipeline through apply.
 #
 # Stages: 1 detect-changes → 2 checks → 3 preprocessing → 4 plan → 5 plan-summary → 6 OPA → 7 apply (main only).
-# Naming: .github/NAMING.md. ACTIONS: checkout, create-github-app-token, setup-terraform, configure-aws-credentials, git-path-filter.
+# Naming: .github/naming.md. ACTIONS: checkout, create-github-app-token, setup-terraform, configure-aws-credentials, git-path-filter.
 # =============================================================================
 
 name: Terraform
@@ -20,6 +20,8 @@ env:
   TF_EXEC_IAM_ROLE: ${{ github.event_name == 'workflow_dispatch' && inputs.terraform_exec_iam_role || '' }}
   TF_EXEC_ROLE_REGION: ${{ github.event_name == 'workflow_dispatch' && inputs.terraform_exec_role_region || 'us-east-1' }}
   TF_OPA_POLICY_PATH: ${{ github.event_name == 'workflow_dispatch' && inputs.opa_policy_path || 'platform/policies/terraform' }}
+  # Skip refresh in CI so plan uses state (e.g. from daily refresh). Set to false to re-fetch data sources every plan.
+  TF_SKIP_REFRESH: ${{ vars.TF_SKIP_REFRESH != 'false' && 'true' || 'false' }}
 
 on:
   # Main only via PR merge (no direct push): full pipeline through apply.
@@ -269,7 +271,12 @@ jobs:
           else
             terraform workspace new "$workspace"
           fi
-          terraform plan -input=false -no-color -out=tfplan -var-file="$var_file_path"
+          REFRESH_FLAG=""
+          if [ "${{ env.TF_SKIP_REFRESH }}" = "true" ]; then
+            REFRESH_FLAG="-refresh=false"
+            echo "Using -refresh=false (TF_SKIP_REFRESH); data sources use state (run daily refresh workflow to update)."
+          fi
+          terraform plan -input=false -no-color $REFRESH_FLAG -out=tfplan -var-file="$var_file_path"
 
       # Step 4.8: Generate plan-<workspace>.json and .binary for OPA and apply
       - name: Generate plan JSON and binary for OPA/apply
