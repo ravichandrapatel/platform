@@ -38,9 +38,98 @@ on:
           - monorepo
           - subtree
 
+concurrency:
+  group: platform-component-manager-${{ github.event.inputs.component_path }}
+  cancel-in-progress: false
+
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs and component layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATH_NAME="${{ github.event.inputs.component_path }}"
+          MODE="${{ github.event.inputs.mode }}"
+          TAG_CONTENT="${{ github.event.inputs.tag_content || 'monorepo' }}"
+
+          echo "component_path=$PATH_NAME"
+          echo "mode=$MODE"
+          echo "tag_content=$TAG_CONTENT"
+
+          if [ ! -d "$PATH_NAME" ] && [ ! -f "$PATH_NAME" ]; then
+            echo "::error::component_path not found: $PATH_NAME"
+            exit 1
+          fi
+
+          case "$PATH_NAME" in
+            workflows/*|platform/workflows/*)
+              if [ -d "$PATH_NAME" ]; then
+                if ! ls "$PATH_NAME"/* >/dev/null 2>&1; then
+                  echo "::error::Workflow folder is empty: $PATH_NAME"
+                  exit 1
+                fi
+              else
+                case "$PATH_NAME" in
+                  *.yml|*.yaml) ;;
+                  *)
+                    echo "::error::Workflow file must be .yml or .yaml: $PATH_NAME"
+                    exit 1
+                    ;;
+                esac
+              fi
+              ;;
+            actions/*|platform/actions/*)
+              if [ ! -d "$PATH_NAME" ]; then
+                echo "::error::Action path must be a directory: $PATH_NAME"
+                exit 1
+              fi
+              if [ ! -f "$PATH_NAME/action.yml" ] && [ ! -f "$PATH_NAME/action.yaml" ]; then
+                echo "::error::Missing action.yml in $PATH_NAME"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::warning::Unrecognized component_path prefix. Expected actions/* or workflows/*."
+              ;;
+          esac
+
+      - name: Lint workflow YAML (actionlint)
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATH_NAME="${{ github.event.inputs.component_path }}"
+
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+
+          case "$PATH_NAME" in
+            workflows/*|platform/workflows/*)
+              if [ -d "$PATH_NAME" ]; then
+                shopt -s nullglob
+                files=( "$PATH_NAME"/*.yml "$PATH_NAME"/*.yaml )
+                shopt -u nullglob
+                if [ "${#files[@]}" -eq 0 ]; then
+                  echo "::error::No .yml/.yaml files found under $PATH_NAME"
+                  exit 1
+                fi
+                ./actionlint -color .github/workflows/platform-component-manager.yml "${files[@]}"
+              else
+                ./actionlint -color .github/workflows/platform-component-manager.yml "$PATH_NAME"
+              fi
+              ;;
+            *)
+              echo "Not a workflow component; skip actionlint."
+              ;;
+          esac
+
   manage-component:
     runs-on: ubuntu-latest
+    needs: validate
     permissions:
       contents: write
 
@@ -56,11 +145,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_TOKEN: ${{ secrets.COMMIT_TOKEN }}
         run: |
-          TOKEN="${COMMIT_TOKEN:-${GITHUB_TOKEN:-}}"
-          if [ -n "${TOKEN:-}" ]; then
-            REPO="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -n 's/.*github\.com[:\/]\(.*\)\.git/\1/p')}"
-            [ -n "$REPO" ] && git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${REPO}.git"
-          fi
           PATH_NAME="${{ github.event.inputs.component_path }}"
           if [ "${{ github.event.inputs.mode }}" != "promote" ]; then
             echo "Skip publish step (rollback)."
@@ -68,6 +152,14 @@ jobs:
           fi
           case "$PATH_NAME" in
             workflows/*|platform/workflows/*)
+              if [ -z "${COMMIT_TOKEN:-}" ]; then
+                echo "::error::This operation modifies .github/workflows. Configure secret COMMIT_TOKEN (PAT with repo + workflow) to push workflow updates."
+                exit 1
+              fi
+              TOKEN="${COMMIT_TOKEN}"
+              REPO="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -n 's/.*github\.com[:\/]\(.*\)\.git/\1/p')}"
+              [ -n "$REPO" ] && git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${REPO}.git"
+
               mkdir -p .github/workflows
               if [ -d "$PATH_NAME" ]; then
                 for f in "$PATH_NAME"/*; do
@@ -113,11 +205,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          TOKEN="${COMMIT_TOKEN:-${GITHUB_TOKEN:-}}"
-          if [ -n "${TOKEN:-}" ]; then
-            REPO="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -n 's/.*github\.com[:\/]\(.*\)\.git/\1/p')}"
-            [ -n "$REPO" ] && git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${REPO}.git"
-          fi
           PATH_NAME="${{ github.event.inputs.component_path }}"
           VER="${{ github.event.inputs.version }}"
           TAG_CONTENT="${{ github.event.inputs.tag_content || 'monorepo' }}"
@@ -125,6 +212,28 @@ jobs:
           FULL_TAG="${PATH_NAME}/${VER}"
           STABLE_TAG="${PATH_NAME}/${MAJOR}"
           SUBTREE_BRANCH="release/subtree-$(echo "$PATH_NAME" | tr '/' '-')-${VER}"
+
+          NEED_PAT=0
+          case "$PATH_NAME" in
+            workflows/*|platform/workflows/*) NEED_PAT=1 ;;
+            *)
+              if [ "$TAG_CONTENT" = "monorepo" ]; then
+                NEED_PAT=1
+              fi
+              ;;
+          esac
+
+          if [ "$NEED_PAT" -eq 1 ]; then
+            if [ -z "${COMMIT_TOKEN:-}" ]; then
+              echo "::error::This operation updates a ref that contains workflow files. Configure secret COMMIT_TOKEN (PAT with repo + workflow) to push tags/rollbacks."
+              exit 1
+            fi
+            TOKEN="${COMMIT_TOKEN}"
+          else
+            TOKEN="${GITHUB_TOKEN}"
+          fi
+          REPO="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -n 's/.*github\.com[:\/]\(.*\)\.git/\1/p')}"
+          [ -n "$REPO" ] && git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${REPO}.git"
 
           if [ "${{ github.event.inputs.mode }}" = "promote" ]; then
             echo "Promoting $PATH_NAME to version $VER (tag_content=$TAG_CONTENT)..."
@@ -186,6 +295,10 @@ jobs:
               git push origin --delete "$SUBTREE_BRANCH" 2>/dev/null || true
               echo "Subtree tag created: $FULL_TAG"
             else
+              if git show-ref --tags --verify --quiet "refs/tags/$FULL_TAG"; then
+                echo "::error::Tag already exists: $FULL_TAG"
+                exit 1
+              fi
               git tag "$FULL_TAG" -m "Release $PATH_NAME $VER"
               git tag -f "$STABLE_TAG" -m "Stable $PATH_NAME $MAJOR"
               git push origin "$FULL_TAG"
@@ -193,6 +306,10 @@ jobs:
             fi
           else
             echo "Rolling back $STABLE_TAG to point to $FULL_TAG..."
+            if ! git show-ref --tags --verify --quiet "refs/tags/$FULL_TAG"; then
+              echo "::error::Cannot rollback; tag does not exist: $FULL_TAG"
+              exit 1
+            fi
             git tag -f "$STABLE_TAG" "$FULL_TAG"
             git push origin "$STABLE_TAG" --force
           fi
