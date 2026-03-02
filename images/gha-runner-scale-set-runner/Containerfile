@@ -22,8 +22,9 @@ ARG RUNNER_VERSION=2.321.0
 ARG RUNNER_CONTAINER_HOOKS_VERSION=0.8.1
 
 # Update base for compliance; do not change RUNNER_VERSION / RUNNER_CONTAINER_HOOKS_VERSION
+# --allowerasing: UBI9 has curl-minimal; allow replacing with curl to satisfy dependency.
 RUN dnf update -y --nodocs --setopt=install_weak_deps=False \
-    && dnf install -y --nodocs --setopt=install_weak_deps=False curl unzip ca-certificates \
+    && dnf install -y --nodocs --setopt=install_weak_deps=False --allowerasing curl unzip ca-certificates \
     && dnf clean all
 
 RUN test -n "$TARGETPLATFORM" || (echo "TARGETPLATFORM must be set" && false)
@@ -67,8 +68,9 @@ ENV _BUILDAH_STARTED_IN_USERNS="" \
     STORAGE_DRIVER=vfs
 
 # Update base for compliance; do not change RUNNER_VERSION. Exclude container-selinux for rootless (blog).
+# --allowerasing: UBI9 curl-minimal conflicts with curl; allow replacement.
 RUN dnf update -y --nodocs --setopt=install_weak_deps=False \
-    && dnf install -y --nodocs --setopt=install_weak_deps=False \
+    && dnf install -y --nodocs --setopt=install_weak_deps=False --allowerasing \
         git sudo curl jq unzip ca-certificates shadow-utils libcap \
         podman buildah skopeo crun fuse-overlayfs slirp4netns \
         --exclude=container-selinux \
