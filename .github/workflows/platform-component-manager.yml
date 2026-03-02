@@ -107,6 +107,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
           if [ -n "${GITHUB_TOKEN:-}" ]; then
             REPO="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -n 's/.*github\.com[:\/]\(.*\)\.git/\1/p')}"
             [ -n "$REPO" ] && git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
