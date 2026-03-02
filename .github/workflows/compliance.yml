@@ -87,10 +87,11 @@ jobs:
       - name: Detect container runtime (Podman or Buildah)
         id: runtime
         run: |
-          if command -v podman &>/dev/null; then
-            echo "runtime=podman" >> $GITHUB_OUTPUT
-          elif command -v buildah &>/dev/null; then
+          # Prefer buildah when available; fall back to podman.
+          if command -v buildah &>/dev/null; then
             echo "runtime=buildah" >> $GITHUB_OUTPUT
+          elif command -v podman &>/dev/null; then
+            echo "runtime=podman" >> $GITHUB_OUTPUT
           else
             echo "::error::Neither Podman nor Buildah is available."
             exit 1
@@ -200,7 +201,16 @@ jobs:
           SUB="${{ matrix.image }}"
           TAG2="${{ github.run_id }}"
           cd "${{ steps.path.outputs.dir }}"
-          $RT build -t "${{ matrix.image }}:compliance" -f Containerfile .
+          FILE=""
+          if [ -f "Containerfile" ]; then
+            FILE="Containerfile"
+          elif [ -f "Dockerfile" ]; then
+            FILE="Dockerfile"
+          else
+            echo "::error::No Containerfile or Dockerfile found in $(pwd)"
+            exit 1
+          fi
+          $RT build -t "${{ matrix.image }}:compliance" -f "$FILE" .
           # Podman/Buildah require full registry path when tagging for remote push
           FULL_LATEST="$REG/$SUB:latest"
           FULL_TAG2="$REG/$SUB:$TAG2"
