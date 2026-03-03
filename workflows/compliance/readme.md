@@ -1,10 +1,16 @@
 # Compliance
 
-Canonical source for the Compliance workflow.
+Canonical source for the **Compliance** workflow.
 
-This workflow **is published** to GitHub Actions at `.github/workflows/compliance.yml` so it can run on schedule and via `workflow_dispatch`.
+## Purpose
 
-Pipeline security aligns with **OWASP SPVS** (Secure Pipeline Verification Standard); see [platform/owasp-spvs.md](../../owasp-spvs.md).
+- **Trivy** config and filesystem scan for each platform image (Buildah/Podman); build and push only when Critical=0.
+- Updates the compliance table in the root **readme** and **compliance.md** after each run.
+- **When it runs:** First Sunday of month (cron) or manual via Actions → Compliance. Inputs: `image_to_build` (ALL or single image name), `registry`, `pull_registry`.
 
-Source: `workflows/compliance/compliance.yml`
-Published: `.github/workflows/compliance.yml`
+## Where it lives
+
+- **Source:** `platform/workflows/compliance/compliance.yml`
+- **Published:** `.github/workflows/compliance.yml` (so GitHub runs it on schedule and `workflow_dispatch`).
+
+Pipeline security aligns with **OWASP SPVS**; see [owasp-spvs.md](../../owasp-spvs.md) and [devsecops-spvs-standard.md](../../devsecops-spvs-standard.md).

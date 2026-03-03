@@ -25,6 +25,7 @@ Production deployment for [Actions Runner Controller](https://github.com/actions
    ```bash
    kubectl create secret generic arc-gh-secret -n arc-system --from-literal=github_token='ghp_YOUR_PAT'
    ```
+   **Production:** Prefer a **GitHub App installation token** (short-lived, scoped); use a PAT only for local/dev. See [devsecops-spvs-standard.md](../../devsecops-spvs-standard.md) and [platform-component-manager.md](../../platform-component-manager.md#security-and-tokens).
 2. **Runner image** – Set in the overlay’s **scale-set-values.yaml** (`template.spec.containers[0].image`).
 
 ## Base and overlays

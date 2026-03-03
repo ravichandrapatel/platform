@@ -4,6 +4,8 @@ This document is the **technical standard** for Python- and Shell-based GitHub A
 
 **References:** [OWASP SPVS](https://owasp.org/www-project-spvs) · [GitHub SPVS](https://github.com/OWASP/www-project-spvs) · [SPVS Release 1.0](https://github.com/OWASP/www-project-spvs/tree/Release-1.0/1.0)
 
+**Related:** [Platform Component Manager](platform-component-manager.md) · [SECURITY policy](SECURITY.md)
+
 ---
 
 ## Table of contents
@@ -95,6 +97,8 @@ jobs:
 
 - [ ] **Prefer 40-character commit SHA for third-party actions.** Use the full SHA of the commit you have reviewed (e.g. `uses: actions/checkout@11bd7190...`) instead of a tag (e.g. `@v4`) when your security policy requires it.
 - [ ] **Document exceptions.** If you use tags (e.g. `@v4`) for convenience, document that in this standard or in the workflow comment, and ensure Dependabot or equivalent can update actions.
+- [ ] **Release pipeline:** For the Platform Component Manager and other critical release workflows, prefer SHA pinning for third-party actions used in validate/security/execute jobs where practical; document any tag usage in the workflow or here.
+- [ ] **Tag by design (explicit exception):** The Platform Component Manager workflow may use tags (e.g. `@v4`) for third-party actions when upgrades are reviewed and documented at release time; prefer SHA where practical. This exception is documented here so audits treat it as intentional rather than oversight.
 
 **Example (SHA-pinned):**
 
@@ -373,8 +377,8 @@ Quick reference for PR and release gates:
 ## Related documentation
 
 - [OWASP SPVS alignment](owasp-spvs.md) – How this repo uses SPVS at a high level.
-- [Platform Component Manager](readme-platform-component-manager.md) – Release workflow and Stage 2 (Security SPVS) full-repo validation.
-- [Security and tokens](readme-platform-component-manager.md#security-and-tokens) – Token and GitHub App guidance for protected branches.
+- [Platform Component Manager](platform-component-manager.md) – Release workflow and Stage 2 (Security SPVS) full-repo validation.
+- [Security and tokens](platform-component-manager.md#security-and-tokens) – Token and GitHub App guidance for protected branches.
 
 ---
 

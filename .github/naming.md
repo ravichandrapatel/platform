@@ -6,12 +6,14 @@ Use these rules for workflow files under `.github/` and for the Terraform pipeli
 
 | Item | Convention | Example |
 |------|------------|---------|
-| Readme in a folder | `readme.md` (lowercase) | `platform/actions/drift-auditor/readme.md`, `platform/addons/vault/readme.md` |
-| Topic-specific readme at platform root or .github | `readme-<topic>.md` (full kebab-case) | `readme-platform-component-manager.md`, `.github/readme-terraform.md` |
+| Readme in a folder | `readme.md` (lowercase) | `platform/actions/drift-auditor/readme.md`, `platform/workflows/compliance/readme.md` |
+| Topic-specific readme at platform root or .github | `readme-<topic>.md` or `platform-<topic>.md` (kebab-case) | `platform-component-manager.md`, `.github/readme-terraform.md` |
 | Other documentation (.md) | kebab-case (lowercase, hyphen-separated) | `naming.md`, `architecture-terraform.md`, `devsecops-spvs-standard.md`, `rules-writing-scripts-actions-workflows.md`, `compliance.md`, `owasp-spvs.md` |
 | Exception (GitHub convention) | `SECURITY.md` (uppercase) | Security policy; GitHub displays it from repo root. |
 
 All `.md` files under `platform/` use this so links and tooling stay consistent.
+
+**Workflows:** Canonical source lives under `platform/workflows/<name>/`. Some workflows (e.g. Compliance, Dependency-Check nightly) are **published** to `.github/workflows/` so GitHub runs them; others are **reference** or released via Platform Component Manager when promoted.
 
 ## Workflow
 

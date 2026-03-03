@@ -100,6 +100,8 @@ Together, this gives you a single release pipeline for:
 - **Platform actions** (under `actions/`)
 - **Platform workflows** (under `workflows/` / `platform/workflows/`)
 
+Any path **`actions/<name>`** or **`workflows/<name>`** that exists and passes validation can be released (RC → promote) or rolled back; there is no hardcoded list of components.
+
 ---
 
 ## Jobs and environments

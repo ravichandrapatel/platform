@@ -4,6 +4,8 @@ Single folder for **custom reusable actions** and **container images** used by t
 
 **Contents:** [Layout](#layout) · [Actions](#reusable-actions) · [Images](#container-images) · [Workflows](#workflows) · [Releasing](#releasing-tagged-versions) · [Handbook](#handbook) (getting started, architecture, rollback, troubleshooting, CLI, security).
 
+**Where to find what:** Standards and process: [devsecops-spvs-standard.md](devsecops-spvs-standard.md), [owasp-spvs.md](owasp-spvs.md), [SECURITY.md](SECURITY.md). Release flow: [platform-component-manager.md](platform-component-manager.md). Naming and conventions: [.github/naming.md](.github/naming.md), [rules-writing-scripts-actions-workflows.md](rules-writing-scripts-actions-workflows.md). Compliance: [compliance.md](compliance.md).
+
 ---
 
 ## Layout
@@ -59,6 +61,12 @@ See [Releasing](#releasing-tagged-versions) for how we publish versions so app t
 
 Details: see `readme.md` in each action folder.
 
+### Adding a new action
+
+1. Create **`platform/actions/<name>/`** with **`action.yml`** (or `action.yaml`) and a **`readme.md`** that describes purpose, inputs, outputs, and usage.
+2. Add any scripts (e.g. Python) that the action calls; follow [rules-writing-scripts-actions-workflows.md](rules-writing-scripts-actions-workflows.md) and [devsecops-spvs-standard.md](devsecops-spvs-standard.md).
+3. Run **Platform Component Manager** with `component_path=actions/<name>`, `version` (e.g. `1.0.0`), `mode=rc` on **develop**, then merge to main and run with `mode=promote` on **main**. Any path **`actions/<name>`** that exists and passes validation can be released or rolled back.
+
 ---
 
 ## Container images
@@ -77,6 +85,8 @@ Details: see `readme.md` in each action folder.
 2. Add optional **`platform/images/<id>/image-info.yaml`** with `name`, `base`, `purpose` for the README table.
 3. Add an entry to **`platform/images/images.yaml`** (`id`, `pull_only`, optional `build_args`). The compliance workflow and README table pick it up automatically.
 
+**README tables:** The actions list, images table, and compliance badge in this readme can be updated by **`scripts/update_readme.py`** (e.g. after adding actions/images or to set the badge org/repo). Run it when maintaining this file.
+
 ### Build tags
 
 - **owasp-dependency-check:** Built by nightly; compliance pulls and scans.
@@ -85,7 +95,8 @@ Details: see `readme.md` in each action folder.
 ### Compliance status
 
 <!-- COMPLIANCE_TABLE_START -->
-[![Compliance](https://github.com/ravichandrapatel/platform/actions/workflows/compliance.yml/badge.svg)](https://github.com/ravichandrapatel/platform/actions/workflows/compliance.yml)
+[![Compliance](https://github.com/YOUR_ORG/YOUR_REPO/actions/workflows/compliance.yml/badge.svg)](https://github.com/YOUR_ORG/YOUR_REPO/actions/workflows/compliance.yml)
+<!-- Replace YOUR_ORG/YOUR_REPO with your GitHub org and repo (e.g. scripts/update_readme.py --repo org/repo). -->
 
 Full table: [compliance.md](compliance.md)
 <!-- COMPLIANCE_TABLE_END -->
@@ -96,7 +107,7 @@ Workflow **Compliance** (`.github/workflows/compliance.yml`): first Sunday of mo
 
 ## Workflows
 
-Workflows live in **`.github/workflows/`** at the repo root. Source/copies under **`platform/workflows/`**.
+Workflows that **run** on GitHub live in **`.github/workflows/`** at the repo root. The **canonical source** for many of them is under **`platform/workflows/`**; the Platform Component Manager (promote mode) copies workflow files from `platform/workflows/<name>/` into `.github/workflows/` so they execute. Only files in `.github/workflows/` are run by GitHub.
 
 | Workflow | Source | Purpose |
 |----------|--------|---------|
@@ -109,11 +120,19 @@ Workflows live in **`.github/workflows/`** at the repo root. Source/copies under
 
 Reusable workflows are called with `uses: org/repo/.github/workflows/name.yml@ref`.
 
+**Reference vs released:** Workflows under `platform/workflows/compliance/` and `dependency-check-nightly/` are **published** to `.github/workflows/` (by repo setup or PCM). Others (e.g. `nodejs-app`, `drift-check`) are **reference** or released via PCM when you promote them.
+
+### Adding a new reusable workflow
+
+1. Create **`platform/workflows/<name>/`** with your workflow `.yml` and a **`readme.md`** that describes purpose, inputs, and when it runs.
+2. Run **Platform Component Manager** with `component_path=workflows/<name>`, `version` (e.g. `1.0.0`), `mode=rc` on **develop**, then merge to main and run with `mode=promote` on **main**. Promote copies the workflow into `.github/workflows/` and creates tags so other repos can call it with `uses: org/repo/.github/workflows/<name>.yml@v1`.
+3. Any path **`actions/<name>`** or **`workflows/<name>`** that exists and passes validation can be released (RC → promote) or rolled back.
+
 ---
 
 ## Releasing tagged versions
 
-- **Actions/workflows:** Use **Platform Component Manager** (Actions → Run workflow). `component_path`: e.g. `actions/owasp-dependency-check` or `workflows/nodejs-app`. `version`: e.g. `1.2.0`. `mode`: `rc` (on develop) then `promote` (on main), or `rollback`. See [readme-platform-component-manager.md](readme-platform-component-manager.md) for full detail.
+- **Actions/workflows:** Use **Platform Component Manager** (Actions → Run workflow). `component_path`: e.g. `actions/owasp-dependency-check` or `workflows/nodejs-app`. `version`: e.g. `1.2.0`. `mode`: `rc` (on develop) then `promote` (on main), or `rollback`. See [platform-component-manager.md](platform-component-manager.md) for full detail.
 
 ### Usage for application teams
 

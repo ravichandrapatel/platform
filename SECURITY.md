@@ -19,7 +19,7 @@ We align with **OWASP Secure Pipeline Verification Standard (SPVS) v1.0** for pi
 
 - **SPVS overview and how we use it:** [owasp-spvs.md](owasp-spvs.md)
 
-- **Release workflow and full-repo SPVS validation:** [readme-platform-component-manager.md](readme-platform-component-manager.md) (Stage 2: Security SPVS).
+- **Release workflow and full-repo SPVS validation:** [platform-component-manager.md](platform-component-manager.md) (Stage 2: Security SPVS).
 
 ## Quick checklist
 
