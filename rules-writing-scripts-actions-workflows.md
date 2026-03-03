@@ -158,7 +158,7 @@ These are short, practical habits we follow per language or tool. They keep our 
 
 - Put workflows under `.github/workflows/` and prefer **official actions** (`actions/*`) where possible.
 - Use OIDC or short-lived credentials; avoid long-lived secrets in code.
-- For repeated blocks (e.g. the same step in several jobs), use YAML anchors (`&name` and `*name`) so we don’t duplicate large sections.
+- **YAML anchors:** Use anchors only for **non-security** repeated blocks (e.g. shared checkout step, repeated **env** maps). **Do not use anchors for `permissions`:** GitHub’s parser can treat permission blocks with strict schema validation, and OWASP SPVS prefers **explicit per-job permissions** so auditors see the exact scope without tracing YAML references. Define permissions explicitly on each job; for reuse across repos, use **reusable workflows**, not anchors.
 - Workflows that can be triggered automatically (e.g. on push/PR) should also support manual run (`workflow_dispatch`) with the same inputs when that makes sense.
 - Before building a new action, write down pros/cons versus using a few plain steps, and decide who will call it and how it should fail.
 

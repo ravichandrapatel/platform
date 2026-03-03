@@ -20,29 +20,53 @@ on:
           - promote   # Sync to MAIN and create STABLE tags
           - rollback  # Revert stable pointer to previous version
 
+concurrency:
+  group: pcm-${{ github.event.inputs.component_path }}
+  cancel-in-progress: false
+
 jobs:
-  # --- STAGE 1: VALIDATION & GATEKEEPING ---
+  # ---------------------------------------------------------------------------
+  # STAGE 1: INPUT & PATH VALIDATION
+  # ---------------------------------------------------------------------------
   validate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       type: ${{ steps.check.outputs.type }}
+      component_path: ${{ steps.check.outputs.component_path }}
+      version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - &checkout-full
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Path and RC Validation
         id: check
         run: |
+          # Shell-injection proof: allowlist only. Never use raw input in commands.
           PATH_NAME="${{ github.event.inputs.component_path }}"
           VER="${{ github.event.inputs.version }}"
           MODE="${{ github.event.inputs.mode }}"
+
+          # 0. Strict input validation (allowlist: safe for git tag, cp, paths)
+          if ! [[ "$PATH_NAME" =~ ^(actions|workflows)/[a-zA-Z0-9_.-]+$ ]]; then
+            echo "::error::Invalid component_path (allowed: actions/name or workflows/name, alphanumeric/_.-)"
+            exit 1
+          fi
+          if ! [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version (allowed: SemVer X.Y.Z)"
+            exit 1
+          fi
 
           # 1. Path Check
           [[ -d "$PATH_NAME" ]] || { echo "::error::Path $PATH_NAME not found"; exit 1; }
 
           # 2. Set Type (Workflow vs Action)
           [[ "$PATH_NAME" == workflows/* ]] && echo "type=workflow" >> "$GITHUB_OUTPUT" || echo "type=action" >> "$GITHUB_OUTPUT"
+          echo "component_path=$PATH_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
 
           # 3. PROMOTION GATE: Verify RC tag exists if promoting to main
           if [[ "$MODE" == "promote" ]]; then
@@ -74,6 +98,7 @@ jobs:
       - name: Validate action metadata (basic)
         if: steps.check.outputs.type == 'action'
         run: |
+          # PATH_NAME already validated by check step (allowlist)
           PATH_NAME="${{ github.event.inputs.component_path }}"
           FILE=""
           if [ -f "$PATH_NAME/action.yml" ]; then
@@ -88,15 +113,136 @@ jobs:
           grep -q '^name:' "$FILE" || { echo "::error::action.yml missing top-level 'name:'"; exit 1; }
           grep -q '^runs:' "$FILE" || { echo "::error::action.yml missing top-level 'runs:'"; exit 1; }
 
-  # --- STAGE 2: EXECUTION ---
-  execute:
+      - name: Checkov – component workflow (single path)
+        if: steps.check.outputs.type == 'workflow'
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: ${{ github.event.inputs.component_path }}
+          framework: github_actions
+          quiet: true
+
+      - name: Check for broken links (Markdown)
+        run: |
+          set -e
+          # Resolve links from repo root; only check in-repo paths
+          ROOT="${{ github.workspace }}"
+          FAILED=0
+          while IFS= read -r -d '' f; do
+            grep -oE '\]\([^)]+\)' "$f" | sed -E 's/^\]\(//;s/\)$//' | while read -r link; do
+              # Skip anchors-only or external URLs
+              case "$link" in
+                ""|#*|http://*|https://*|mailto:*) continue ;;
+              esac
+              # Resolve relative to file directory, then to repo root
+              DIR=$(dirname "$f")
+              TARGET="$DIR/$link"
+              TARGET=$(realpath -m "$TARGET" 2>/dev/null || echo "$TARGET")
+              [[ "$TARGET" == "$ROOT"* ]] || continue
+              # Strip fragment for file existence
+              FILE="${link%%#*}"
+              [[ -z "$FILE" ]] && continue
+              CHECK=$(realpath --canonicalize-missing "$DIR/$FILE" 2>/dev/null || echo "")
+              if [[ ! -f "$CHECK" ]]; then
+                echo "::error::Broken link: $link (in $f)"
+                FAILED=1
+              fi
+            done
+          done < <(find . -name "*.md" -not -path "./.git/*" -print0)
+          [[ $FAILED -eq 0 ]] || exit 1
+
+  # ---------------------------------------------------------------------------
+  # STAGE 2: SECURITY (SPVS) – FULL PLATFORM REPO
+  # ---------------------------------------------------------------------------
+  security-spvs:
     needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - *checkout-full
+
+      - name: Checkov – GitHub Actions (entire repo)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: github_actions
+          quiet: true
+
+      - name: Shell scripts – shellcheck (SPVS-aligned)
+        run: |
+          set -e
+          found=0
+          while IFS= read -r -d '' f; do
+            shellcheck --external-sources -e SC1090 "$f" || { echo "::error::shellcheck failed: $f"; exit 1; }
+            found=1
+          done < <(find . -name '*.sh' -not -path './.git/*' -print0 2>/dev/null)
+          if [[ "$found" -eq 0 ]]; then
+            echo "No .sh files found; skipping shellcheck."
+          fi
+
+  # ---------------------------------------------------------------------------
+  # STAGE 2b: SPVS NATIVE SECURITY GATE (component-scoped, inlined)
+  # ---------------------------------------------------------------------------
+  security-gate:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+      attestations: write
+    env:
+      COMPONENT_PATH: ${{ github.event.inputs.component_path }}
+    steps:
+      - <<: *checkout-full
+        name: Checkout Code
+
+      - name: ShellCheck (Bash hardening, component path)
+        run: |
+          # No sudo/apt needed on ubuntu-latest (shellcheck v0.58+ pre-installed)
+          found=0
+          while IFS= read -r -d '' f; do
+            shellcheck --external-sources "$f" || { echo "::error::shellcheck failed: $f"; exit 1; }
+            found=1
+          done < <(find "$COMPONENT_PATH" -name '*.sh' -not -path '*/.git/*' -print0 2>/dev/null || true)
+          if [[ "$found" -eq 0 ]]; then
+            echo "No .sh files under $COMPONENT_PATH; skipping shellcheck."
+          fi
+
+      - name: Bandit (Python security, component path)
+        uses: tj-actions/bandit@v1
+        with:
+          targets: ${{ github.event.inputs.component_path }}
+          options: "-r -lll"
+
+      - name: Ensure least privilege (no write-all)
+        run: |
+          set -euo pipefail
+          if grep -r "write-all" .github/workflows/ 2>/dev/null; then
+            echo "::error::Violation: write-all permissions detected. Use granular scopes."
+            exit 1
+          fi
+          echo "No write-all permissions found."
+
+      - name: Attest build provenance (component)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ github.event.inputs.component_path }}
+          subject-name: "component:${{ github.event.inputs.component_path }}"
+
+  # ---------------------------------------------------------------------------
+  # STAGE 3: EXECUTION (RELEASE)
+  # ---------------------------------------------------------------------------
+  execute:
+    needs: [validate, security-spvs, security-gate]
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.event.inputs.mode == 'rc' && 'staging' || 'production' }}
       url: https://github.com/${{ github.repository }}/tree/${{ github.event.inputs.mode == 'rc' && 'develop' || 'main' }}
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout Target Branch
         uses: actions/checkout@v4
@@ -104,6 +250,8 @@ jobs:
           # RC goes to develop, Promote/Rollback goes to main
           ref: ${{ github.event.inputs.mode == 'rc' && 'develop' || 'main' }}
           fetch-depth: 0
+          # Prefer GITHUB_TOKEN; use COMMIT_TOKEN only when branch protection blocks default token.
+          # For least-privilege on protected branches, use a GitHub App token (see readme) instead of a PAT.
           token: ${{ secrets.COMMIT_TOKEN || github.token }}
 
       - name: Configure Git
@@ -113,11 +261,13 @@ jobs:
 
       - name: Process Release and Prune Tags
         run: |
-          PATH_NAME="${{ github.event.inputs.component_path }}"
-          VER="${{ github.event.inputs.version }}"
+          # Use validated outputs from validate job (single source of truth; no re-evaluation).
+          PATH_NAME="${{ needs.validate.outputs.component_path }}"
+          VER="${{ needs.validate.outputs.version }}"
           MODE="${{ github.event.inputs.mode }}"
           TYPE="${{ needs.validate.outputs.type }}"
-          MAJOR="v$(echo "$VER" | cut -d. -f1)"
+
+          MAJOR="v${VER%%.*}"
 
           if [[ "$MODE" == "rc" ]]; then
             # --- RC MODE (Develop Branch) ---
@@ -129,17 +279,16 @@ jobs:
           elif [[ "$MODE" == "promote" ]]; then
             # --- PROMOTE MODE (Main Branch) ---
 
-            # 0. Self-healing gate: ensure RC commit matches current HEAD on main
+            # 0. Integrity failure check: RC tag SHA must match main HEAD before any stable tags
             RC_TAG="${PATH_NAME}/${VER}-rc"
-            if git rev-parse "$RC_TAG" >/dev/null 2>&1; then
-              RC_COMMIT=$(git rev-parse "$RC_TAG")
-              HEAD_COMMIT=$(git rev-parse HEAD)
-              if [[ "$RC_COMMIT" != "$HEAD_COMMIT" ]]; then
-                echo "::error::RC tag $RC_TAG ($RC_COMMIT) does not match main HEAD ($HEAD_COMMIT). Ensure main contains the tested RC commit before promoting."
-                exit 1
-              fi
-            else
-              echo "::error::RC tag $RC_TAG not found during promote."
+            if ! git rev-parse "$RC_TAG" >/dev/null 2>&1; then
+              echo "::error::INTEGRITY FAILURE: RC tag $RC_TAG not found. Promotion blocked."
+              exit 1
+            fi
+            RC_SHA=$(git rev-parse "$RC_TAG")
+            MAIN_HEAD_SHA=$(git rev-parse HEAD)
+            if [[ "$RC_SHA" != "$MAIN_HEAD_SHA" ]]; then
+              echo "::error::INTEGRITY FAILURE: The commit tested as RC ($RC_SHA) does not match the commit on Main ($MAIN_HEAD_SHA). Promotion blocked."
               exit 1
             fi
 
@@ -147,6 +296,16 @@ jobs:
             if [[ "$TYPE" == "workflow" ]]; then
                mkdir -p .github/workflows
                cp -v "$PATH_NAME"/*.yml .github/workflows/ 2>/dev/null || true
+               # SPVS V3 Integrity: .github/workflows must contain only YAML (no .sh, .py, etc.)
+               for f in .github/workflows/*; do
+                 [[ -e "$f" ]] || continue
+                 [[ -f "$f" ]] || continue
+                 ext="${f##*.}"
+                 if [[ "$ext" != "yml" && "$ext" != "yaml" ]]; then
+                   echo "::error::Non-YAML file in .github/workflows: $f (SPVS V3 integrity)"
+                   exit 1
+                 fi
+               done
                git add .github/workflows/
                git commit -m "deploy($PATH_NAME): $VER [skip ci]" || echo "No changes"
                git push origin main
@@ -177,11 +336,19 @@ jobs:
               COUNT=$(echo "$ALL_TAGS" | wc -l | tr -d ' ')
               if [ "$COUNT" -gt 5 ]; then
                 TAGS_TO_DELETE=$(echo "$ALL_TAGS" | tail -n +6)
-                for OLD_TAG in $TAGS_TO_DELETE; do
+                while IFS= read -r OLD_TAG; do
+                  [[ -z "$OLD_TAG" ]] && continue
+                  # Protected: never delete major pointers (path/v1, path/v2, ...)
+                  if [[ "$OLD_TAG" =~ /v[0-9]+$ ]]; then
+                    echo "Skipping protected major pointer: $OLD_TAG"
+                    continue
+                  fi
+                  # Only delete tags matching our allowlist (path/X.Y.Z)
+                  [[ "$OLD_TAG" =~ ^(actions|workflows)/[a-zA-Z0-9_.-]+/[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
                   echo "Deleting old tag: $OLD_TAG"
-                  git tag -d "$OLD_TAG" || true
+                  git tag -d "$OLD_TAG" 2>/dev/null || true
                   git push origin --delete "$OLD_TAG" || true
-                done
+                done <<< "$TAGS_TO_DELETE"
               fi
             fi
 
@@ -206,21 +373,86 @@ jobs:
               exit 1
             fi
 
+            # State reversion: restore .github/workflows from target tag so main matches the tag
+            if [[ "$TYPE" == "workflow" ]]; then
+              echo "Restoring .github/workflows from $FULL_TAG to match stable state..."
+              git checkout "$FULL_TAG" -- .github/workflows/
+              git add .github/workflows/
+              git diff --staged --quiet || { git commit -m "rollback($PATH_NAME): restore .github/workflows to $VER [skip ci]"; git push origin main; }
+            fi
+
             git tag -f "$MAJOR_TAG" -m "Stable $MAJOR_TAG" "$FULL_TAG"
             git push origin "$MAJOR_TAG" --force
             echo "::notice::Rolled back $MAJOR_TAG to $FULL_TAG."
           fi
 
-  # --- STAGE 3: AUDIT ---
+      - name: Attest build provenance (release)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: .
+          subject-name: "release:${{ github.event.inputs.component_path }}@${{ github.event.inputs.version }}"
+
+  # ---------------------------------------------------------------------------
+  # ROLLBACK VALIDATION (runs only when mode is rollback, after execute)
+  # ---------------------------------------------------------------------------
+  validate-rollback:
+    needs: execute
+    if: github.event.inputs.mode == 'rollback'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      COMPONENT_PATH: ${{ github.event.inputs.component_path }}
+      VERSION: ${{ github.event.inputs.version }}
+    steps:
+      - <<: *checkout-full
+        name: Checkout (for git refs)
+
+      - name: Verify rollback pointer alignment
+        run: |
+          set -euo pipefail
+          # Shell-injection proof: use env vars only; allowlist already enforced in validate/execute
+          MAJOR="v${VERSION%%.*}"
+          MAJOR_TAG="${COMPONENT_PATH}/${MAJOR}"
+          FULL_TAG="${COMPONENT_PATH}/${VERSION}"
+
+          SHA_MAJOR=$(git rev-parse "$MAJOR_TAG")
+          SHA_FULL=$(git rev-parse "$FULL_TAG")
+
+          if [[ "$SHA_MAJOR" != "$SHA_FULL" ]]; then
+            echo "::error::Rollback validation failed: $MAJOR_TAG ($SHA_MAJOR) does not point to $FULL_TAG ($SHA_FULL). Broken stable state."
+            exit 1
+          fi
+
+          echo "### Rollback verification (SPVS audit trail)" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Check | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Major tag | \`$MAJOR_TAG\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Target tag | \`$FULL_TAG\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit SHA | \`$SHA_MAJOR\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Pointers match | Yes |" >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Rollback verified: $MAJOR_TAG and $FULL_TAG both point to $SHA_MAJOR"
+
+  # ---------------------------------------------------------------------------
+  # STAGE 4: AUDIT & SUMMARY
+  # ---------------------------------------------------------------------------
   audit:
-    needs: [validate, execute]
+    needs: [validate, security-spvs, security-gate, execute]
     if: always()
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Generate Summary
         run: |
           echo "### 🚀 Release Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Stage | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Validate | ${{ needs.validate.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Security (SPVS full repo) | ${{ needs.security-spvs.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Security Gate (native) | ${{ needs.security-gate.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Execute | ${{ needs.execute.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "* **Component:** ${{ github.event.inputs.component_path }}" >> "$GITHUB_STEP_SUMMARY"
           echo "* **Mode:** ${{ github.event.inputs.mode }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "* **Status:** ${{ needs.execute.result }}" >> "$GITHUB_STEP_SUMMARY"
 

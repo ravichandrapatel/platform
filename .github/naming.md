@@ -8,7 +8,8 @@ Use these rules for workflow files under `.github/` and for the Terraform pipeli
 |------|------------|---------|
 | Readme in a folder | `readme.md` (lowercase) | `platform/actions/drift-auditor/readme.md`, `platform/addons/vault/readme.md` |
 | Topic-specific readme at platform root or .github | `readme-<topic>.md` (full kebab-case) | `readme-platform-component-manager.md`, `.github/readme-terraform.md` |
-| Other documentation (.md) | kebab-case (lowercase, hyphen-separated) | `naming.md`, `architecture-terraform.md`, `rules-writing-scripts-actions-workflows.md`, `compliance.md` |
+| Other documentation (.md) | kebab-case (lowercase, hyphen-separated) | `naming.md`, `architecture-terraform.md`, `devsecops-spvs-standard.md`, `rules-writing-scripts-actions-workflows.md`, `compliance.md`, `owasp-spvs.md` |
+| Exception (GitHub convention) | `SECURITY.md` (uppercase) | Security policy; GitHub displays it from repo root. |
 
 All `.md` files under `platform/` use this so links and tooling stay consistent.
 

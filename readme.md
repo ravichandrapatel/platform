@@ -2,6 +2,8 @@
 
 Single folder for **custom reusable actions** and **container images** used by this repo and by application teams. All builds use **Buildah or Podman only** (no Docker). No CodeQL; compliance is Trivy on images.
 
+**Contents:** [Layout](#layout) · [Actions](#reusable-actions) · [Images](#container-images) · [Workflows](#workflows) · [Releasing](#releasing-tagged-versions) · [Handbook](#handbook) (getting started, architecture, rollback, troubleshooting, CLI, security).
+
 ---
 
 ## Layout
@@ -40,11 +42,22 @@ Runs OWASP Dependency-Check using a pre-built UBI9 image. Requires **Podman** on
     project: my-app
     path: .
     format: HTML
-    # When using from another repo, pass the platform image (built and pushed by this repo):
     image: ghcr.io/YOUR_ORG/IDP/owasp-dependency-check:latest
 ```
 
-See [Releasing](#releasing) for how we publish versions so app teams can use `@v1.x.x`.
+See [Releasing](#releasing-tagged-versions) for how we publish versions so app teams can use `@v1.x.x`.
+
+### All platform actions
+
+| Action | Path | Purpose |
+|--------|------|---------|
+| **owasp-dependency-check** | `platform/actions/owasp-dependency-check/` | OWASP Dependency-Check in CI (Podman, UBI9 image). |
+| **git-path-filter** | `platform/actions/git-path-filter/` | Detect file changes between refs; YAML pattern groups; JSON output for monorepo path filters. |
+| **drift-auditor** | `platform/actions/drift-auditor/` | Terraform drift: parallel `terraform plan` (S3 backend), single "Infrastructure Drift Report" Issue per repo. |
+| **prbot** | `platform/actions/prbot/` | Create or reuse a PR (same or another repo). Idempotent. |
+| **janitor-bot** | `platform/actions/janitor-bot/` | Scan/cleanup stale branches, PRs, artifacts, packages (repo/org/topic). Config via env. |
+
+Details: see `readme.md` in each action folder.
 
 ---
 
@@ -62,18 +75,12 @@ See [Releasing](#releasing) for how we publish versions so app teams can use `@v
 
 1. Create **`platform/images/<id>/`** with at least a **Containerfile** (and any scripts it needs).
 2. Add optional **`platform/images/<id>/image-info.yaml`** with `name`, `base`, `purpose` for the README table.
-3. Add an entry to **`platform/images/images.yaml`**:
-   - `id`: same as folder name.
-   - `pull_only: true` if the image is built elsewhere (e.g. nightly) and compliance should only pull and scan.
-   - `pull_only: false` and optional `build_args` (e.g. `TARGETPLATFORM=linux/amd64`) if compliance should build it.
-
-The compliance workflow and README table will pick it up automatically.
+3. Add an entry to **`platform/images/images.yaml`** (`id`, `pull_only`, optional `build_args`). The compliance workflow and README table pick it up automatically.
 
 ### Build tags
 
-- **owasp-dependency-check:** Built by nightly; compliance pulls `ghcr.io/<repo>/owasp-dependency-check:latest` and scans.
-- **gha-runner-scale-set-runner:** Built in compliance or locally; tag e.g. `ghcr.io/org/gha-runner-scale-set-runner:latest`.
-- **gha-runner-scale-set-controller:** Built in compliance or locally; tag e.g. `ghcr.io/org/gha-runner-scale-set-controller:0.13.1`.
+- **owasp-dependency-check:** Built by nightly; compliance pulls and scans.
+- **gha-runner-scale-set-runner** / **gha-runner-scale-set-controller:** Built in compliance or locally; tag e.g. `ghcr.io/org/<name>:latest`.
 
 ### Compliance status
 
@@ -83,54 +90,114 @@ The compliance workflow and README table will pick it up automatically.
 Full table: [compliance.md](compliance.md)
 <!-- COMPLIANCE_TABLE_END -->
 
-Workflow **Compliance** (`.github/workflows/compliance.yml`) runs on the first Sunday of each month (and on demand): Trivy config+fs per image, optional build+push when Critical=0, then updates this table. For each image:
-
-- **Trivy config + fs** runs in each `images/<name>/` folder; results are written to `trivy-results.json`.
-- **Build and push** (Docker) runs only when **Critical** vulnerabilities are 0.
-- The table above is updated by `scripts/update_readme.py` after all scans complete.
-
+Workflow **Compliance** (`.github/workflows/compliance.yml`): first Sunday of month + manual. Trivy config+fs per image; build+push only when Critical=0; updates this table. See [Compliance workflow](#compliance-workflow) below.
 
 ---
 
 ## Workflows
 
-Workflows that build or scan platform images live in **`.github/workflows/`** at the **repo root** (GitHub only runs workflows from there). They reference `platform/images/` and `platform/actions/` by path. Copies of workflow files are kept under **`platform/workflows/`** for reference only.
+Workflows live in **`.github/workflows/`** at the repo root. Source/copies under **`platform/workflows/`**.
 
-**Reusable workflows:** GitHub only loads reusable workflows from **`.github/workflows/`**. You cannot put them in `platform/workflows/` and have other repos or workflows call them; they must live in `.github/workflows/` (e.g. `.github/workflows/compliance.yml`). Callers use `uses: org/repo/.github/workflows/compliance.yml@ref`.
+| Workflow | Source | Purpose |
+|----------|--------|---------|
+| **Platform Component Manager** | `.github/workflows/platform-component-manager.yml` | RC → promote → rollback for actions/workflows; validate, security-spvs, security-gate, execute, audit. |
+| **Compliance** | `platform/workflows/compliance/` | Trivy per image; build+push when Critical=0; updates compliance table. |
+| **Dependency-Check UBI9 (nightly)** | `platform/workflows/dependency-check-nightly/` | Build and push owasp-dependency-check image to GHCR. |
+| **nodejs-app** | `platform/workflows/nodejs-app/` | Reusable Node.js app workflow. |
+| **terraform** / **terraform-refresh-daily** | `platform/workflows/terraform/`, `terraform-refresh-daily/` | Terraform plan/apply; daily refresh. |
+| **drift-check** | `platform/workflows/drift-check/` | Drift detection (uses drift-auditor action). |
 
-| Workflow | Purpose |
-|----------|--------|
-| Dependency-Check UBI9 (nightly) | Build and push owasp-dependency-check image to GHCR |
-| Compliance | First Sunday of month + manual: Trivy config+fs per image (matrix, max 4); build+push only if Critical=0; updates compliance table in README |
+Reusable workflows are called with `uses: org/repo/.github/workflows/name.yml@ref`.
 
 ---
 
 ## Releasing tagged versions
 
-- **Reusable actions:** Use the **Platform Component Manager** workflow (Actions → Platform Component Manager → Run workflow). Set `component_path` to the action folder (e.g. `platform/actions/owasp-dependency-check`), choose **promote** or **rollback**, and the **version** (e.g. `1.2.0`). This creates/updates tags like `platform/actions/owasp-dependency-check/1.2.0` and `platform/actions/owasp-dependency-check/v1`. See [readme-platform-component-manager.md](readme-platform-component-manager.md).
-- **Reusable workflows:** They live in `.github/workflows/`. To release a tagged version, create a tag that includes the desired commit (e.g. repo tag `v1.0.0` or use the component manager with a path like `.github/workflows` if you version that folder). Callers reference the workflow with that ref: `uses: org/repo/.github/workflows/name.yml@v1.0.0`.
-
----
-
-## Releasing (workflows and actions only; no third-party actions)
-
-Release and tag promotion use only `run:` (git + `gh` CLI).
-
-### Develop – release candidate
-
-- **On push to `develop`** (e.g. when a PR is merged to develop): the workflow updates a **single** tag **`1.0.0-rc`** to the latest develop commit (force-update). Reuse the same RC tag for fixes; only one RC tag is kept.
-
-### Main – stable
-
-- **On push to `main`** (promotion after testing): the workflow promotes to stable:
-  1. If tag **`1.0.0`** already exists, the **previous** commit is archived as **`1.0.0-<short-sha>`**.
-  2. Tag **`1.0.0`** is force-updated to the new main commit (latest code = `1.0.0`).
-  3. A **GitHub Release** is created for `1.0.0` with notes from `platform/CHANGELOG.md`.
-  4. **Tag pruning:** only the **last 10 tags** on main are kept (`1.0.0` + up to 9 archived `1.0.0-<sha>`); older archived tags are deleted.
+- **Actions/workflows:** Use **Platform Component Manager** (Actions → Run workflow). `component_path`: e.g. `actions/owasp-dependency-check` or `workflows/nodejs-app`. `version`: e.g. `1.2.0`. `mode`: `rc` (on develop) then `promote` (on main), or `rollback`. See [readme-platform-component-manager.md](readme-platform-component-manager.md) for full detail.
 
 ### Usage for application teams
 
-- **Stable (production):** `uses: YOUR_ORG/IDP/platform/actions/owasp-dependency-check@1.0.0`
-- **Release candidate (testing):** `uses: YOUR_ORG/IDP/platform/actions/owasp-dependency-check@1.0.0-rc`
+- **Stable:** `uses: YOUR_ORG/IDP/platform/actions/owasp-dependency-check@1.0.0`
+- **RC:** `uses: YOUR_ORG/IDP/platform/actions/owasp-dependency-check@1.0.0-rc`
 
-When using from another repo, pass the **image** input (e.g. `ghcr.io/YOUR_ORG/IDP/owasp-dependency-check:latest`).
+From another repo, pass the **image** input (e.g. `ghcr.io/YOUR_ORG/IDP/owasp-dependency-check:latest`).
+
+---
+
+## Handbook
+
+### Getting started
+
+1. Create or update the component under `platform/actions/<name>` or `platform/workflows/<name>`.
+2. **RC on develop:** Actions → Platform Component Manager → `component_path`, `version` (e.g. `1.2.0`), `mode`: `rc`.
+3. Merge to `main`.
+4. **Promote on main:** Same workflow, same `component_path` and `version`, `mode`: `promote`.
+5. Security gates (validate, Checkov, ShellCheck, Bandit, attestation) must pass before promote.
+
+### Architecture – Platform Component Manager
+
+Four stages: **validate** → **security-spvs** → **security-gate** → **execute**; **audit** always runs.
+
+```mermaid
+flowchart TD
+  A["workflow_dispatch"] --> B["validate"]
+
+  subgraph STAGE1["Stage 1 – Validation"]
+    B1["Input allowlist"] --> B2["Path check"]
+    B2 --> B3["Type: workflow vs action"]
+    B3 --> B4["RC / SemVer gate"]
+    B4 --> B5["Action metadata or Checkov"]
+  end
+
+  B --> S["security-spvs"]
+  subgraph STAGE2["Stage 2 – SPVS"]
+    S1["Checkov entire repo"]
+    S2["ShellCheck all .sh"]
+  end
+
+  S --> G["security-gate"]
+  G --> C["execute"]
+  subgraph STAGE3["Stage 3 – Execution"]
+    C1["rc: tag path/VER-rc on develop"]
+    C2["promote: sync workflows, tag path/VER, path/vMAJOR, prune"]
+    C3["rollback: move stable tag to path/VER"]
+  end
+
+  C --> E["audit summary"]
+```
+
+### Compliance workflow
+
+- **Runs:** First Sunday of month (cron) or manual (Actions → Compliance). Inputs: `image_to_build` (ALL or single name), `registry`, `pull_registry`.
+- **Steps:** Discovery (image folders with Containerfile) → matrix per image (max 4): Trivy config+fs → if Critical=0, build (Buildah/Podman) and push; artifacts uploaded. Post: update README/compliance table.
+- **Standards:** [owasp-spvs.md](owasp-spvs.md).
+
+### Rollback
+
+To point the stable major tag (e.g. `actions/my-action/v1`) at an older version (e.g. `1.1.0`): run Platform Component Manager on `main` with `component_path`, `version` = target (e.g. `1.1.0`), `mode`: `rollback`. The full tag must already exist. Rollback only moves the major alias; it does not delete newer full tags.
+
+### Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| "RC tag required for promote" | Create RC on develop with same path/version; merge to main; then promote. |
+| "Version regression" | Use a version higher than latest, or use rollback to move stable to an older version. |
+| Checkov / ShellCheck fail | Fix reported findings in workflow YAML or `.sh`; re-run. |
+| "Broken link" (validate job) | Fix or add the linked file; paths resolved from repo root. |
+
+### CLI (gh)
+
+```bash
+gh run list --workflow "Platform Component Manager" --limit 10
+gh workflow run "Platform Component Manager" --ref develop -f component_path=workflows/nodejs-app -f version=1.0.0 -f mode=rc
+gh workflow run "Platform Component Manager" --ref main -f component_path=workflows/nodejs-app -f version=1.0.0 -f mode=promote
+gh workflow run "Platform Component Manager" --ref main -f component_path=workflows/nodejs-app -f version=0.9.0 -f mode=rollback
+git tag -l "workflows/nodejs-app/*"
+```
+
+Local testing: `./platform/act/run.sh` (see [act/readme.md](act/readme.md)).
+
+### Security and standards (OWASP SPVS)
+
+- **Secure coding (summary):** Python: `subprocess` list-based, no `shell=True`/`eval`/`exec`; path validation. Shell: `set -euo pipefail`, `"$VAR"`, no `${{ }}` in `run:` (use `env:`). Actions: explicit `permissions:` per job, no anchors; attestation for release.
+- **Full standard:** [devsecops-spvs-standard.md](devsecops-spvs-standard.md). **SPVS overview:** [owasp-spvs.md](owasp-spvs.md). **Policy:** [SECURITY.md](SECURITY.md).
