@@ -95,8 +95,7 @@ Details: see `readme.md` in each action folder.
 ### Compliance status
 
 <!-- COMPLIANCE_TABLE_START -->
-[![Compliance](https://github.com/YOUR_ORG/YOUR_REPO/actions/workflows/compliance.yml/badge.svg)](https://github.com/YOUR_ORG/YOUR_REPO/actions/workflows/compliance.yml)
-<!-- Replace YOUR_ORG/YOUR_REPO with your GitHub org and repo (e.g. scripts/update_readme.py --repo org/repo). -->
+[![Compliance](https://github.com/ravichandrapatel/platform/actions/workflows/compliance.yml/badge.svg)](https://github.com/ravichandrapatel/platform/actions/workflows/compliance.yml)
 
 Full table: [compliance.md](compliance.md)
 <!-- COMPLIANCE_TABLE_END -->
