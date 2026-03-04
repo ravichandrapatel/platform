@@ -27,6 +27,13 @@ SCOPE_REPO = "repo"
 SCOPE_REPOS = "repos"
 SCOPE_TOPIC = "topic"
 
+PROJECT_PREFIX = "[JANITOR-BOT]"
+
+
+def _log(message: str) -> None:
+    """INTENT: Print a message with the project prefix (breadcrumb/debug). INPUT: message (str). OUTPUT: None. SIDE_EFFECTS: stdout."""
+    print(f"{PROJECT_PREFIX} {message}")
+
 
 def _parse_repo_spec(spec: str, default_owner: str) -> tuple[str, str]:
     """INTENT: Return (owner, repo_name). spec is 'repo-name' or 'owner/repo-name'.
@@ -161,7 +168,7 @@ class RateLimiter:
             now = int(time.time())
             wait = self._reset_epoch - now
             if wait > 0:
-                print(f"⏳ Rate limit low ({self._remaining} remaining); waiting {wait}s until reset")
+                _log(f"[DBG-920] Rate limit low ({self._remaining} remaining); waiting {wait}s until reset")
                 time.sleep(wait)
                 self._remaining = None
 
@@ -238,17 +245,17 @@ class GitHubApiClient:
                         reset = RateLimiter.reset_epoch_from_headers(headers)
                         wait = (reset - int(time.time())) if reset else RateLimiter.RETRY_BACKOFF_BASE
                     wait = max(1, min(wait, 300))
-                    print(f"⚠️ API rate limit ({code}); retry in {wait}s (attempt {attempt + 1}/{RateLimiter.MAX_RETRIES})")
+                    _log(f"[DBG-921] API rate limit ({code}); retry in {wait}s (attempt {attempt + 1}/{RateLimiter.MAX_RETRIES})")
                     time.sleep(wait)
                     continue
-                print(f"API Error: {e}")
+                _log(f"[DBG-922] API Error: {e}")
                 return None
             except Exception as e:
                 last_error = e
-                print(f"API Error: {e}")
+                _log(f"[DBG-922] API Error: {e}")
                 return None
         if last_error:
-            print(f"API Error (max retries): {last_error}")
+            _log(f"[DBG-923] API Error (max retries): {last_error}")
         return None
 
     def list_artifacts(self, owner: str, repo: str) -> list[dict]:
@@ -274,6 +281,13 @@ class GitHubApiClient:
     def delete_artifact(self, owner: str, repo: str, artifact_id: int) -> bool:
         """Delete one artifact. Returns True if request succeeded (204)."""
         url = f"https://api.github.com/repos/{owner}/{repo}/actions/artifacts/{artifact_id}"
+        result = self.request(url, method="DELETE")
+        return result is not None
+
+    def delete_branch(self, owner: str, repo: str, branch: str) -> bool:
+        """Delete branch ref. Returns True if 204."""
+        ref = f"heads/{branch}"
+        url = f"https://api.github.com/repos/{owner}/{repo}/git/refs/{ref}"
         result = self.request(url, method="DELETE")
         return result is not None
 
@@ -362,20 +376,20 @@ class RepoResolver:
         if scope == SCOPE_REPO:
             spec = self._config.get("repo", "").strip()
             if not spec:
-                print("Error: SCOPE=repo requires REPO to be set")
+                _log("[DBG-910] Error: SCOPE=repo requires REPO to be set")
                 raise SystemExit(1)
             if "/" not in spec and not org:
-                print("Error: SCOPE=repo with REPO as name requires ORG_NAME (or use owner/repo)")
+                _log("[DBG-911] Error: SCOPE=repo with REPO as name requires ORG_NAME (or use owner/repo)")
                 raise SystemExit(1)
             result.append(_parse_repo_spec(spec, org or ""))
 
         elif scope == SCOPE_REPOS:
             reps = self._config.get("repos", [])
             if not reps:
-                print("Error: SCOPE=repos requires REPOS to be set (comma or newline separated)")
+                _log("[DBG-912] Error: SCOPE=repos requires REPOS to be set (comma or newline separated)")
                 raise SystemExit(1)
             if any("/" not in s for s in reps) and not org:
-                print("Error: SCOPE=repos with repo names (no owner/) requires ORG_NAME")
+                _log("[DBG-913] Error: SCOPE=repos with repo names (no owner/) requires ORG_NAME")
                 raise SystemExit(1)
             for spec in reps:
                 result.append(_parse_repo_spec(spec, org or ""))
@@ -383,13 +397,13 @@ class RepoResolver:
         elif scope == SCOPE_TOPIC:
             topic = self._config.get("repo_topic", "").strip()
             if not topic or not org:
-                print("Error: SCOPE=topic requires ORG_NAME and REPO_TOPIC (or TOPIC) to be set")
+                _log("[DBG-914] Error: SCOPE=topic requires ORG_NAME and REPO_TOPIC (or TOPIC) to be set")
                 raise SystemExit(1)
             q = f"org:{org} topic:{topic}"
             url = f"https://api.github.com/search/repositories?q={quote(q)}&per_page=100"
             data = self._client.request(url)
             if not data or not isinstance(data, dict):
-                print("Error: Could not search repos by topic")
+                _log("[DBG-915] Error: Could not search repos by topic")
                 raise SystemExit(1)
             for r in data.get("items", []):
                 full = r.get("full_name", "")
@@ -399,7 +413,7 @@ class RepoResolver:
 
         else:
             if not org:
-                print("Error: SCOPE=org requires ORG_NAME to be set")
+                _log("[DBG-916] Error: SCOPE=org requires ORG_NAME to be set")
                 raise SystemExit(1)
             repos_data = self._client.request(
                 f"https://api.github.com/orgs/{org}/repos?per_page=100&type=all"
@@ -410,7 +424,7 @@ class RepoResolver:
                     if name:
                         result.append((org, name))
             else:
-                print("Error: Could not list org repos")
+                _log("[DBG-917] Error: Could not list org repos")
                 raise SystemExit(1)
 
         return result
@@ -437,8 +451,9 @@ class JanitorBot:
         self._api = api_client
         self.report: dict = {"branches": [], "prs": [], "packages": [], "artifacts": []}
 
-    def scan_branches(self, owner: str, repo: str) -> None:
+    def scan_branches(self, owner: str, repo: str, mode: str = "scan") -> None:
         rules = self.config["branches"]
+        dry_run = self.config["dry_run"]
         url = f"https://api.github.com/repos/{owner}/{repo}/branches?per_page=100"
         branches = self._api.request(url)
         if not branches:
@@ -484,6 +499,9 @@ class JanitorBot:
                     "owner": c_data["commit"]["committer"].get("name", "unknown"),
                     "days": (datetime.now(tz=timezone.utc) - last_date).days,
                 })
+                if mode == "cleanup" and not dry_run and not b.get("protected", False):
+                    if self._api.delete_branch(owner, repo, name):
+                        _log(f"[DBG-003] Deleted branch: {name}")
 
     def process_artifacts(self, owner: str, repo: str, mode: str) -> None:
         """List artifacts, filter by name pattern and age/keep_count; report and optionally delete."""
@@ -527,11 +545,11 @@ class JanitorBot:
                 aid = a.get("id")
                 if aid is not None:
                     if self._api.delete_artifact(owner, repo, int(aid)):
-                        print(f"  Deleted artifact: {a.get('name')} (id={aid})")
+                        _log(f"[DBG-004] Deleted artifact: {a.get('name')} (id={aid})")
                     else:
-                        print(f"  Failed to delete artifact: {a.get('name')} (id={aid})")
+                        _log(f"[DBG-924] Failed to delete artifact: {a.get('name')} (id={aid})")
             elif mode == "cleanup" and dry_run:
-                print(f"  [dry-run] Would delete artifact: {a.get('name')} (id={a.get('id')}, {days}d old)")
+                _log(f"[DBG-005] [dry-run] Would delete artifact: {a.get('name')} (id={a.get('id')}, {days}d old)")
 
     def process_prs(self, owner: str, repo: str, mode: str) -> None:
         """List open PRs, filter by stale_days, exclude_labels, and optional head ref pattern; report and optionally close."""
@@ -568,11 +586,11 @@ class JanitorBot:
             })
             if mode == "cleanup" and not dry_run:
                 if self._api.close_issue(owner, repo, pr_number):
-                    print(f"  Closed PR #{pr_number}: {title}")
+                    _log(f"[DBG-006] Closed PR #{pr_number}: {title}")
                 else:
-                    print(f"  Failed to close PR #{pr_number}")
+                    _log(f"[DBG-925] Failed to close PR #{pr_number}")
             elif mode == "cleanup" and dry_run:
-                print(f"  [dry-run] Would close PR #{pr_number}: {title} (head={head_ref}, {days}d old)")
+                _log(f"[DBG-007] [dry-run] Would close PR #{pr_number}: {title} (head={head_ref}, {days}d old)")
 
     def process_packages(self, org: str, mode: str) -> None:
         """List org packages, filter by name pattern; for each package keep keep_count newest versions, report and delete older."""
@@ -607,11 +625,11 @@ class JanitorBot:
                 })
                 if mode == "cleanup" and vid is not None and not dry_run:
                     if self._api.delete_package_version(org, package_type, pkg_name, int(vid)):
-                        print(f"  Deleted package version: {pkg_name} id={vid}")
+                        _log(f"[DBG-008] Deleted package version: {pkg_name} id={vid}")
                     else:
-                        print(f"  Failed to delete package version: {pkg_name} id={vid}")
+                        _log(f"[DBG-926] Failed to delete package version: {pkg_name} id={vid}")
                 elif mode == "cleanup" and dry_run:
-                    print(f"  [dry-run] Would delete package version: {pkg_name} id={vid} ({days}d old)")
+                    _log(f"[DBG-009] [dry-run] Would delete package version: {pkg_name} id={vid} ({days}d old)")
 
     def generate_report(self) -> None:
         """Write Markdown report; explicitly state the thresholds used for the scan."""
@@ -698,7 +716,7 @@ class JanitorBot:
             else:
                 f.write("## Packages\n\nNo matching stale package versions found.\n\n")
 
-        print("Report written to janitor_report.md")
+        _log("[DBG-002] Report written to janitor_report.md")
 
 
 class ScanRunner:
@@ -711,8 +729,7 @@ class ScanRunner:
     def run(self, repos: list[tuple[str, str]], mode: str) -> None:
         for i, (owner, repo_name) in enumerate(repos):
             if self._config.get("cleanup_branches", True):
-                if mode == "scan":
-                    self._bot.scan_branches(owner, repo_name)
+                self._bot.scan_branches(owner, repo_name, mode)
             if self._config.get("cleanup_artifacts", False):
                 self._bot.process_artifacts(owner, repo_name, mode)
             if self._config.get("cleanup_prs", False):
@@ -732,27 +749,27 @@ class ScanRunner:
 
 def main() -> None:
     """INTENT: Parse args, load config, run scan or cleanup. INPUT: None (argv). OUTPUT: None. SIDE_EFFECTS: Network, disk, stdout."""
-    # _log("[T-01] Starting Janitor Bot")
+    _log("[DBG-000] Starting Janitor Bot...")
     parser = argparse.ArgumentParser(description="Janitor Bot: scan or cleanup stale branches/PRs")
     parser.add_argument("--mode", choices=["scan", "cleanup"], required=True)
     args = parser.parse_args()
 
     config = get_config()
     if not config["token"]:
-        print("Error: GH_TOKEN must be set (e.g. via workflow env)")
+        _log("[DBG-918] Error: GH_TOKEN must be set (e.g. via workflow env)")
         raise SystemExit(1)
     scope = config.get("scope", SCOPE_ORG)
     if scope == SCOPE_ORG or scope == SCOPE_TOPIC:
         if not config["org"]:
-            print("Error: ORG_NAME must be set for scope=org or scope=topic")
+            _log("[DBG-919] Error: ORG_NAME must be set for scope=org or scope=topic")
             raise SystemExit(1)
     elif scope == SCOPE_REPO and not config.get("repo"):
         if not config["org"]:
-            print("Error: ORG_NAME or REPO must be set for scope=repo")
+            _log("[DBG-919] Error: ORG_NAME or REPO must be set for scope=repo")
             raise SystemExit(1)
     elif scope == SCOPE_REPOS and not config.get("repos"):
         if not config["org"]:
-            print("Error: ORG_NAME (default owner) or REPOS must be set for scope=repos")
+            _log("[DBG-919] Error: ORG_NAME (default owner) or REPOS must be set for scope=repos")
             raise SystemExit(1)
 
     rate_limiter = RateLimiter()
@@ -761,7 +778,7 @@ def main() -> None:
     bot = JanitorBot(config, api_client)
     repos_to_scan = resolver.get_repos()
 
-    batch_delay_str = os.getenv("BATCH_DELAY_SECONDS", "0").strip()
+    batch_delay_str = os.getenv("BATCH_DELAY_SECONDS", "0.1").strip()
     try:
         batch_delay = float(batch_delay_str) if batch_delay_str else 0.0
     except ValueError:
@@ -771,6 +788,7 @@ def main() -> None:
 
     if args.mode == "scan":
         bot.generate_report()
+    _log("[DBG-001] Janitor Bot completed.")
 
 
 if __name__ == "__main__":

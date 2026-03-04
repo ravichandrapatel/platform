@@ -64,6 +64,22 @@ def _log(message: str) -> None:
     print(f"{PROJECT_PREFIX}{message}")
 
 
+def _write_github_output(pr_summary: PullRequestSummary) -> None:
+    """INTENT: Write pr-number and pr-url for GitHub Actions (GITHUB_OUTPUT + legacy set-output).
+    INPUT: pr_summary (dict with number, html_url). OUTPUT: None. SIDE_EFFECTS: File, stdout."""
+    num = pr_summary.get("number")
+    url = (pr_summary.get("html_url") or "").strip()
+    if num is None:
+        return
+    out_path = os.getenv("GITHUB_OUTPUT")
+    if out_path:
+        with open(out_path, "a", encoding="utf-8") as f:
+            f.write(f"pr-number={num}\n")
+            f.write(f"pr-url<<EOF\n{url}\nEOF\n")
+    print(f"::set-output name=pr-number::{num}")
+    print(f"::set-output name=pr-url::{url}")
+
+
 class GitHubApiClient:
     """ROLE: Service. INTENT: Minimal GitHub REST API client (stdlib urllib).
     INPUT: token, api_url. OUTPUT: N/A. SIDE_EFFECTS: Network I/O."""
@@ -228,6 +244,22 @@ def find_existing_pr(
     return None
 
 
+def branch_exists(
+    client: GitHubApiClient,
+    owner: str,
+    repo: str,
+    branch: str,
+) -> bool:
+    """INTENT: Optional safety check that head branch exists before creating PR.
+    INPUT: client, owner, repo, branch (ref name without refs/heads/). OUTPUT: bool. SIDE_EFFECTS: Network."""
+    path = f"/repos/{owner}/{repo}/git/ref/heads/{quote(branch, safe='')}"
+    try:
+        data = client.request_json("GET", path)
+        return isinstance(data, dict) and data.get("ref", "").endswith(f"/{branch}")
+    except GitHubApiError:
+        return False
+
+
 def create_pull_request(
     client: GitHubApiClient,
     owner: str,
@@ -336,8 +368,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             target_branch=args.target_branch,
         )
         if existing is not None:
-            # Idempotent: nothing more to do.
+            _write_github_output(existing)
             return 0
+
+        # Optional safety: ensure head branch exists (same-repo only)
+        if ":" not in args.source_branch:
+            if not branch_exists(client, owner, repo_name, args.source_branch):
+                _log(
+                    f"[DBG-914] Branch '{args.source_branch}' not found in {owner}/{repo_name}. "
+                    "Push the branch first or check the name."
+                )
+                return 1
 
         created = create_pull_request(
             client=client,
@@ -352,6 +393,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             _log("[DBG-912] Failed to create pull request.")
             return 1
 
+        _write_github_output(created)
         _log("[DBG-002] PR Bot completed successfully.")
         return 0
     except GitHubApiError as e:

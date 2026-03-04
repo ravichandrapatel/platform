@@ -1,25 +1,37 @@
-name: 'Git Change Detector'
-description: 'Detects file changes based on YAML patterns (Python implementation of paths-filter)'
+name: 'Git Path Filter'
+description: 'Detects file changes between two refs (YAML glob groups, ** and ! last-match-wins); ref-agnostic, pull_request and push'
 inputs:
   source_branch:
-    description: 'Source branch/ref (e.g. github.head_ref)'
+    description: 'Source/head ref (branch, tag, or SHA; e.g. github.head_ref or github.sha)'
     required: true
   base_ref_branch:
-    description: 'Base branch/ref (e.g. github.base_ref)'
+    description: 'Base ref (branch, tag, or SHA; no origin/ prefix)'
     required: true
   pattern_filter:
-    description: 'YAML string defining the filters'
+    description: 'YAML string defining filter groups (key -> list of globs; ! = exclude)'
     required: true
   github_token:
     description: 'GitHub Token for git operations'
     required: false
     default: ${{ github.token }}
+  change_types:
+    description: 'Optional comma-separated A,M,D to filter by status (e.g. A,M = added/modified only)'
+    required: false
+    default: ''
+  debug:
+    description: 'Set to true to log include/exclude reason per file'
+    required: false
+    default: 'false'
+  working_directory:
+    description: 'Base path for patterns; only paths under this dir are considered; matching is relative to this dir'
+    required: false
+    default: ''
 outputs:
   changes:
     description: 'JSON array of keys that have changes'
     value: ${{ steps.detect.outputs.changes }}
   changes_json:
-    description: 'JSON object containing full change details (has_changes, files) for all keys'
+    description: 'Full details (has_changes, files, every_file_matches) for all keys including _unmatched'
     value: ${{ steps.detect.outputs.changes_json }}
 runs:
   using: "composite"
@@ -37,11 +49,22 @@ runs:
 
     - name: Run detection script
       id: detect
-      run: |
-        python3 ${{ github.action_path }}/main.py \
-          --base-ref "${{ inputs.base_ref_branch }}" \
-          --source-ref "${{ inputs.source_branch }}" \
-          --filter-spec "filter_spec.yaml"
-      shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
+        BASE_REF: ${{ inputs.base_ref_branch }}
+        SOURCE_REF: ${{ inputs.source_branch }}
+        CHANGE_TYPES: ${{ inputs.change_types }}
+        DEBUG_FLAG: ${{ inputs.debug }}
+        WORKING_DIR: ${{ inputs.working_directory }}
+      run: |
+        set -euo pipefail
+        EXTRA_ARGS=()
+        [ -n "${CHANGE_TYPES}" ] && EXTRA_ARGS+=(--change-types "${CHANGE_TYPES}")
+        [ "${DEBUG_FLAG}" = "true" ] && EXTRA_ARGS+=(--debug)
+        [ -n "${WORKING_DIR}" ] && EXTRA_ARGS+=(--working-directory "${WORKING_DIR}")
+        python3 "${{ github.action_path }}/main.py" \
+          --base-ref "${BASE_REF}" \
+          --source-ref "${SOURCE_REF}" \
+          --filter-spec "filter_spec.yaml" \
+          "${EXTRA_ARGS[@]}"
+      shell: bash

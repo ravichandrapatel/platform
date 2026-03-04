@@ -1,124 +1,317 @@
-# Git Change Detector
+# Git Path Filter
 
 ![Git Path Filter logo](logo.png)
 
-A robust, Python-based GitHub Composite Action for detecting file changes in a repository. It allows you to define groups of file patterns (using glob syntax) and determines if any files in those groups have changed between two git references.
+A robust, Python-based GitHub Composite Action for detecting file changes in a repository. It compares two git refs (branch, tag, or SHA) and reports which changed files match your YAML-defined pattern groups—so you can run jobs only when relevant paths change.
 
-This action is designed to be **reusable**, meaning you can host it in a central "GitOps" or "DevOps" repository and reference it from any other repository in your organization.
+This action is **reusable**: host it in a central repo and reference it from any workflow (same org or `actions/checkout` + path).
 
-## 🚀 Features
+## Features
 
--   **Python-powered**: Uses Python's `fnmatch` for reliable pattern matching.
--   **Git Integration**: Automatically handles `git fetch` and `git diff` logic to ensure accurate comparisons.
--   **Flexible Filtering**: Supports inclusion and exclusion (`!`) patterns.
--   **JSON Outputs**: Provides structured JSON output for easy consumption in workflows.
--   **Monorepo Friendly**: Ideal for selectively running CI jobs based on modified paths.
+-   **Ref-agnostic**: Works with branches, tags, or SHAs (no `origin/` prefix). Supports `pull_request`, `push`, and `workflow_dispatch`.
+-   **Git**: Fetches with `git fetch origin <ref> --depth=1 --no-tags`; uses `git diff --name-status` for change types (A/M/D). **Zero-SHA guard**: when base is all zeros (new-branch push), lists all files in the source ref.
+-   **Globbing**: Via [wcmatch](https://pypi.org/project/wcmatch/): `**` (recursive), `*`, `?`, `[...]`, `[!a-z]`, brace expansion `{a,b}`; robust edge cases.
+-   **Negation**: `!` prefix with **last-match-wins** (sequential override).
+-   **Status**: Git status preserved where useful: `R` (rename), `C` (copy), `T` (type change → M); others normalized to `A`/`M`/`D`.
+-   **Change types**: Optional filter by status (`A`, `M`, `D`).
+-   **Working directory**: Optional base path; only paths under it are considered; patterns are matched relative to it.
+-   **Outputs**: `has_changes`, `files`, `every_file_matches` per group; `_unmatched` for files not in any group.
+-   **Dependencies**: PyYAML, wcmatch (pinned in `requirements.txt`). CLI: `--debug` for verbose include/exclude logging.
 
-## ⚙️ Inputs
-
+## Inputs
 
 | Input | Description | Required | Default |
 | :--- | :--- | :--- | :--- |
-| `source_branch` | The source reference to check for changes (e.g., `github.head_ref` for PRs). | **Yes** | N/A |
-| `base_ref_branch` | The base reference to compare against (e.g., `github.base_ref` or `main`). | **Yes** | N/A |
-| `pattern_filter` | A YAML-formatted string defining your file groups and patterns. | **Yes** | N/A |
-| `github_token` | GitHub token used to fetch git history. | No | `${{ github.token }}` |
+| `source_branch` | Source/head ref (branch name, tag, or SHA). | **Yes** | — |
+| `base_ref_branch` | Base ref to compare against (no `origin/` prefix). | **Yes** | — |
+| `pattern_filter` | YAML string: key → list of globs; `!` = exclude (last match wins). | **Yes** | — |
+| `github_token` | Token for `git fetch`. | No | `${{ github.token }}` |
+| `change_types` | Comma-separated `A,M,D` to consider only those statuses. | No | `''` |
+| `debug` | `true` to log include/exclude reason per file. | No | `false` |
+| `working_directory` | Base path; only paths under this dir are considered; matching is relative to it. | No | `''` |
 
-## 📤 Outputs
+## Outputs
 
 | Output | Description |
 | :--- | :--- |
-| `changes` | A JSON array of keys (group names) that have changes. Example: `["backend", "docs"]` |
-| `changes_json` | A comprehensive JSON object containing boolean flags and file lists for every group. |
+| `changes` | JSON array of group keys that have changes. e.g. `["backend", "docs"]` |
+| `changes_json` | Full object: per group `has_changes`, `files`, `every_file_matches`; plus `_unmatched`. |
 
-### Output Structure (`changes_json`)
+### Output structure (`changes_json`)
+
+Paths are POSIX (forward slashes).
 
 ```json
 {
   "backend": {
     "has_changes": true,
-    "files": ["src/api/main.py", "requirements.txt"]
+    "files": ["src/api/main.py", "requirements.txt"],
+    "every_file_matches": false
   },
   "frontend": {
     "has_changes": false,
-    "files": []
+    "files": [],
+    "every_file_matches": false
   },
   "_unmatched": {
     "has_changes": true,
-    "files": ["readme.md"]
+    "files": ["readme.md"],
+    "every_file_matches": false
   }
 }
 ```
 
-## Example Usage
+---
 
-The following example demonstrates how to use this action and then run specific jobs based on which group of files has changed. It uses the `fromJSON()` function to parse the output and `needs` context to pass the data between jobs.
+## How to use in all scenarios
+
+Use a single **detect-changes** job and set **source** and **base** refs based on the event. Then pass those refs into the action. Always use **checkout with `fetch-depth: 0`** so the workflow has history for diffing.
+
+### 1. Pull request (PR to target branch)
+
+Compare the **PR head** to the **PR base branch**.
+
+| Ref | Value |
+| --- | ----- |
+| Source | `github.head_ref` (branch name of the PR head) |
+| Base | `github.base_ref` (branch the PR targets, e.g. `main`) |
 
 ```yaml
-# .github/workflows/ci.yml
-name: CI Pipeline
-
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
-  # Job 1: Run the change detection action
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
       changes: ${{ steps.changes.outputs.changes }}
       changes_json: ${{ steps.changes.outputs.changes_json }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Required to fetch git history for diffing
+          fetch-depth: 0
 
-      - name: Detect changes based on YAML filter
+      - name: Detect changes (git-path-filter)
         id: changes
         uses: ./platform/actions/git-path-filter
         with:
           source_branch: ${{ github.head_ref }}
           base_ref_branch: ${{ github.base_ref }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          pattern_filter: |
+            backend:
+              - 'src/**/*.py'
+            frontend:
+              - 'src/**/*.js'
+```
+
+### 2. Push (e.g. merge to default branch)
+
+Compare the **merge commit** (current SHA) to the **previous commit** or the default branch (e.g. for the first push to a new branch, or when `before` is missing).
+
+| Ref | Value |
+| --- | ----- |
+| Source | `github.sha` (commit that triggered the run) |
+| Base | `github.event.before` if present, else `github.event.repository.default_branch` |
+
+```yaml
+on:
+  push:
+    branches: [main]
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.changes.outputs.changes }}
+      changes_json: ${{ steps.changes.outputs.changes_json }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set refs for push
+        id: refs
+        run: |
+          echo "source=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "base=${{ github.event.before || github.event.repository.default_branch }}" >> $GITHUB_OUTPUT
+
+      - name: Detect changes (git-path-filter)
+        id: changes
+        uses: ./platform/actions/git-path-filter
+        with:
+          source_branch: ${{ steps.refs.outputs.source }}
+          base_ref_branch: ${{ steps.refs.outputs.base }}
+          pattern_filter: |
+            app:
+              - '**/*.tfvars'
+```
+
+### 3. Manual run (`workflow_dispatch`)
+
+Compare the **current branch** (ref name) to the **default branch**. Use when running the workflow manually (e.g. on a feature branch before opening a PR).
+
+| Ref | Value |
+| --- | ----- |
+| Source | `github.ref_name` (branch or tag that was checked out) |
+| Base | `github.event.repository.default_branch` (e.g. `main`) |
+
+```yaml
+on:
+  workflow_dispatch:
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.changes.outputs.changes }}
+      changes_json: ${{ steps.changes.outputs.changes_json }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes (git-path-filter)
+        id: changes
+        uses: ./platform/actions/git-path-filter
+        with:
+          source_branch: ${{ github.ref_name }}
+          base_ref_branch: ${{ github.event.repository.default_branch }}
+          pattern_filter: |
+            tfvars:
+              - '**/*.tfvars'
+```
+
+### 4. One workflow: PR, push, and manual
+
+Use one job and set source/base in a previous step from the event name.
+
+```yaml
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.changes.outputs.changes }}
+      changes_json: ${{ steps.changes.outputs.changes_json }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set refs for detection
+        id: refs
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "source=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "base=${{ github.event.repository.default_branch }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "source=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+            echo "base=${{ github.base_ref }}" >> $GITHUB_OUTPUT
+          else
+            echo "source=${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "base=${{ github.event.before || github.event.repository.default_branch }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Detect changes (git-path-filter)
+        id: changes
+        uses: ./platform/actions/git-path-filter
+        with:
+          source_branch: ${{ steps.refs.outputs.source }}
+          base_ref_branch: ${{ steps.refs.outputs.base }}
+          pattern_filter: |
+            tfvars:
+              - '**/*.tfvars'
+```
+
+### 5. New-branch push (zero base)
+
+When the base ref is the **zero SHA** (`0{40}`), the action does not run a diff; it lists **all files** in the source ref (e.g. new branch). Your “Set refs” step can pass `github.event.before` as base; GitHub may send the zero SHA for new-branch pushes.
+
+### 6. Downstream jobs: run only when a group has changes
+
+Use `changes_json` and `fromJSON()` in the job `if` condition:
+
+```yaml
+  run-backend-tests:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.changes_json != '' && fromJSON(needs.detect-changes.outputs.changes_json).backend.has_changes
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./run-backend-tests.sh
+```
+
+Optional: filter by change type (e.g. only added or modified):
+
+```yaml
+      - name: Detect changes (git-path-filter)
+        id: changes
+        uses: ./platform/actions/git-path-filter
+        with:
+          source_branch: ${{ steps.refs.outputs.source }}
+          base_ref_branch: ${{ steps.refs.outputs.base }}
+          change_types: 'A,M'
+          pattern_filter: |
+            backend:
+              - 'src/**/*.py'
+```
+
+---
+
+## Full example: monorepo backend/frontend
+
+```yaml
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.changes.outputs.changes }}
+      changes_json: ${{ steps.changes.outputs.changes_json }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes
+        id: changes
+        uses: ./platform/actions/git-path-filter
+        with:
+          source_branch: ${{ github.head_ref }}
+          base_ref_branch: ${{ github.base_ref }}
           pattern_filter: |
             backend:
               - 'src/api/**/*.py'
-              - 'tests/backend/'
               - 'requirements.txt'
             frontend:
               - 'src/webapp/**/*.js'
-              - 'tests/frontend/'
               - 'package.json'
 
-  # Job 2: Run backend tests only if backend files changed
   run-backend-tests:
     runs-on: ubuntu-latest
-    needs: detect-changes # Depends on the first job
-    # Use fromJSON() to parse the output and access the 'backend' group results
+    needs: detect-changes
     if: needs.detect-changes.outputs.changes_json != '' && fromJSON(needs.detect-changes.outputs.changes_json).backend.has_changes
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - run: echo "Backend tests..."
 
-      - name: Run Backend Tests
-        run: |
-          echo "Backend changes detected. Running tests..."
-          # Add your actual backend test commands here
-          
-  # Job 3: Run frontend tests only if frontend files changed
   run-frontend-tests:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.changes_json != '' && fromJSON(needs.detect-changes.outputs.changes_json).frontend.has_changes
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run Frontend Tests
-        run: |
-          echo "Frontend changes detected. Running tests..."
-          # Add your actual frontend test commands here
+      - uses: actions/checkout@v4
+      - run: echo "Frontend tests..."
 ```

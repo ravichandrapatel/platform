@@ -18,11 +18,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 import urllib.error
 import urllib.request
+
+# Pause API calls when remaining rate limit is at or below this (avoid 403 in logs)
+RATE_LIMIT_PAUSE_THRESHOLD = 10
 
 PREFIX = "[DRIFT-AUDIT]"
 DRIFT_ISSUE_TITLE = "Infrastructure Drift Report"
@@ -71,6 +75,23 @@ class GitHubApiClient:
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 raw = resp.read().decode("utf-8")
+                # API resilience: pause before hitting rate limit (cleaner than 403 in logs)
+                try:
+                    remaining = resp.headers.get("X-RateLimit-Remaining")
+                    if remaining is not None:
+                        left = int(remaining)
+                        if left <= RATE_LIMIT_PAUSE_THRESHOLD:
+                            reset_ts = resp.headers.get("X-RateLimit-Reset")
+                            if reset_ts:
+                                wait = max(0, int(reset_ts) - int(time.time()))
+                                wait = min(wait, 300)
+                                if wait > 0:
+                                    _log(f"[DBG-920] Rate limit low ({left} left); pausing {wait}s until reset.")
+                                    time.sleep(wait)
+                            else:
+                                time.sleep(60)
+                except (ValueError, TypeError):
+                    pass
                 return json.loads(raw) if raw else None
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8") if e.fp else ""
@@ -320,10 +341,12 @@ def _run_plan_worker(
                 return (workspace, 2, [], str(e))
         return (workspace, 1, [], (err or out or "plan failed")[:500])
     finally:
-        try:
-            shutil.rmtree(worker_dir, ignore_errors=True)
-        except Exception:
-            pass
+        # Remove only this worker's temp dir (sub-cache); shared plugin_cache_dir stays intact
+        if worker_dir:
+            try:
+                shutil.rmtree(worker_dir, ignore_errors=True)
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +374,7 @@ def get_backend_workspaces(
 ) -> Set[str]:
     """INTENT: Run init + workspace list in temp dir; return set of backend workspace names.
     INPUT: working_dir, plugin_cache_dir, backend_config_path, init_timeout. OUTPUT: Set[str]. SIDE_EFFECTS: Disk, subprocess."""
+    worker_dir: Optional[str] = None
     worker_dir = _make_worker_dir(working_dir)
     env = os.environ.copy()
     env["TF_PLUGIN_CACHE_DIR"] = plugin_cache_dir
@@ -377,10 +401,12 @@ def get_backend_workspaces(
                 names.add(name)
         return names
     finally:
-        try:
-            shutil.rmtree(worker_dir, ignore_errors=True)
-        except Exception:
-            pass
+        # Remove only this worker's temp dir; shared plugin_cache_dir (root binaries) stays intact
+        if worker_dir:
+            try:
+                shutil.rmtree(worker_dir, ignore_errors=True)
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -494,15 +520,15 @@ def run(
     vars_folder_abs = str(Path(working_dir_abs) / vars_folder.lstrip("/")) if not os.path.isabs(vars_folder) else vars_folder
 
     # _log("[T-01] Discovering workspaces from tfvars")
-    _log("Discovering workspaces from tfvars...")
+    _log("[DBG-001] Discovering workspaces from tfvars...")
     ws_tfvars = discover_workspaces(vars_folder_abs)
     tfvars_workspaces = {w for w, _ in ws_tfvars}
     if not ws_tfvars:
-        _log("No .tfvars found; nothing to plan.")
+        _log("[DBG-910] No .tfvars found; nothing to plan.")
         return 0
 
     # _log("[T-02] Fetching backend workspace list")
-    _log("Fetching backend workspace list (for zombie detection)...")
+    _log("[DBG-002] Fetching backend workspace list (for zombie detection)...")
     backend_workspaces = get_backend_workspaces(
         working_dir_abs, plugin_cache_dir, backend_config_path, init_timeout=init_timeout
     )
@@ -519,7 +545,7 @@ def run(
 
     results: List[Tuple[str, int, List[Dict[str, Any]], Optional[str]]] = []
     # _log("[T-03] Running parallel plans")
-    _log(f"Running plan for {len(ws_tfvars)} workspaces (max_parallel={max_parallel})...")
+    _log(f"[DBG-003] Running plan for {len(ws_tfvars)} workspaces (max_parallel={max_parallel})...")
     with ProcessPoolExecutor(max_workers=max_parallel) as executor:
         futures = {
             executor.submit(
@@ -545,7 +571,7 @@ def run(
     patterns = exclude_patterns or []
     if patterns:
         results, excluded_list = _apply_excludes(results, patterns)
-        _log(f"Excluded {len(excluded_list)} expected drift change(s) matching {len(patterns)} pattern(s).")
+        _log(f"[DBG-004] Excluded {len(excluded_list)} expected drift change(s) matching {len(patterns)} pattern(s).")
     else:
         excluded_list = []
 
@@ -563,19 +589,19 @@ def run(
                 body_with_footer = report_body + "\n\n---\n*Generated by Terraform Drift Auditor*"
                 if issues:
                     api.update_issue(owner, repo_name, issues[0]["number"], body_with_footer)
-                    _log("Updated existing drift issue.")
+                    _log("[DBG-005] Updated existing drift issue.")
                 else:
                     api.create_issue(owner, repo_name, DRIFT_ISSUE_TITLE, body_with_footer)
-                    _log("Created drift issue.")
+                    _log("[DBG-006] Created drift issue.")
             elif issues:
                 api.close_issue(owner, repo_name, issues[0]["number"])
-                _log("Drift resolved; closed drift issue.")
+                _log("[DBG-007] Drift resolved; closed drift issue.")
 
     # Write report to file for artifact (use GITHUB_WORKSPACE in CI if set)
     report_dir = os.getenv("GITHUB_WORKSPACE") or working_dir_abs
     report_path = Path(report_dir) / "drift-report.md"
     report_path.write_text(report_body, encoding="utf-8")
-    _log(f"Report written to {report_path}")
+    _log(f"[DBG-002] Report written to {report_path}")
 
     if has_error:
         return 1

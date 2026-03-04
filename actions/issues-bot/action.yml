@@ -1,0 +1,63 @@
+name: 'Issues Bot'
+description: 'Idempotent issue create/update/close/upsert with tracking-ID dedup, rate-limit resilience, and GITHUB_OUTPUT (issue-number, issue-url).'
+inputs:
+  mode:
+    description: 'create, update, close, or upsert'
+    required: true
+  issue-title:
+    description: 'Title for the issue'
+    required: true
+  tracking-id:
+    description: 'Unique string to identify this issue type (stored in body footer for deduplication)'
+    required: true
+  issue-body:
+    description: 'Supporting markdown text; standardized footer with tracking ID is appended'
+    required: false
+    default: ''
+  labels:
+    description: 'Comma-separated list of labels to apply'
+    required: false
+    default: ''
+  repo:
+    description: 'Repository (owner/repo or name; name uses GITHUB_REPOSITORY_OWNER)'
+    required: false
+    default: ${{ github.repository }}
+  github_token:
+    description: 'Token for GitHub API (issues: write, metadata: read; optional pull_requests: read)'
+    required: false
+    default: ${{ github.token }}
+outputs:
+  issue-number:
+    description: 'Issue number (when created or found/updated)'
+    value: ${{ steps.issues_bot.outputs.issue-number }}
+  issue-url:
+    description: 'Issue URL'
+    value: ${{ steps.issues_bot.outputs.issue-url }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Run Issues Bot
+      id: issues_bot
+      env:
+        MODE: ${{ inputs.mode }}
+        ISSUE_TITLE: ${{ inputs.issue-title }}
+        TRACKING_ID: ${{ inputs.tracking-id }}
+        ISSUE_BODY: ${{ inputs.issue-body }}
+        LABELS: ${{ inputs.labels }}
+        REPO: ${{ inputs.repo }}
+        GH_TOKEN: ${{ inputs.github_token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+        GITHUB_API_URL: ${{ github.api_url }}
+      run: |
+        set -euo pipefail
+        EXTRA=()
+        [ -n "${LABELS}" ] && EXTRA+=(--labels "${LABELS}")
+        python3 "${{ github.action_path }}/issues_bot.py" \
+          --mode "${MODE}" \
+          --repo "${REPO}" \
+          --issue-title "${ISSUE_TITLE}" \
+          --tracking-id "${TRACKING_ID}" \
+          --issue-body "${ISSUE_BODY}" \
+          "${EXTRA[@]}"
+      shell: bash
