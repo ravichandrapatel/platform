@@ -236,6 +236,15 @@ def _normalize_state_address(addr: str) -> str:
     return addr.replace('\\"', '"').strip()
 
 
+def _instance_index_suffix(index_key: Any) -> str:
+    """INTENT: Format instance index to match terraform state list (e.g. [0], [\"key\"]). INPUT: index_key (int/str/None). OUTPUT: str. SIDE_EFFECTS: None."""
+    if index_key is None:
+        return ""
+    if isinstance(index_key, int):
+        return f"[{index_key}]"
+    return f'["{index_key}"]'
+
+
 def extract_and_transform_state(
     old_state: Dict[str, Any],
     repo_key: str,
@@ -252,24 +261,30 @@ def extract_and_transform_state(
         res_mod = resource.get("module", "")
         res_type = resource.get("type", "")
         res_name = resource.get("name", "")
-        old_addr = f"{res_mod}.{res_type}.{res_name}" if res_mod else f"{res_type}.{res_name}"
+        mode = resource.get("mode", "managed")
+        type_display = f"data.{res_type}" if mode == "data" else res_type
+        old_addr_base = f"{res_mod}.{type_display}.{res_name}" if res_mod else f"{type_display}.{res_name}"
         res_mod_normalized = _normalize_state_address(res_mod)
         if search_pattern not in res_mod and search_pattern not in res_mod_normalized:
-            skipped_for_log.append(old_addr)
+            skipped_for_log.append(old_addr_base)
             continue
         new_mod_path = res_mod.replace(search_pattern, "[0]")
-        new_addr = f"{new_mod_path}.{res_type}.{res_name}"
+        new_addr = f"{new_mod_path}.{type_display}.{res_name}"
         if new_addr in seen_addresses:
             continue
         instances = resource.get("instances", [])
         new_instances = []
         for instance in instances:
             new_inst = dict(instance)
-            idx = instance.get("index_key")
+            idx = instance.get("index_key") or instance.get("index")
             if str(idx) == repo_key:
                 new_inst["index_key"] = 0
             # Keep "private" (provider metadata/checksums); stripping can trigger unnecessary recreations.
             new_instances.append(new_inst)
+            # Build address matching terraform state list (one per instance, with [0] / ["key"] suffix).
+            suffix = _instance_index_suffix(idx)
+            instance_addr = old_addr_base + suffix
+            included_addresses.append(instance_addr)
         if not new_instances:
             continue
         new_resource = dict(resource)
@@ -278,7 +293,6 @@ def extract_and_transform_state(
         new_resource.pop("each", None)
         new_resources.append(new_resource)
         seen_addresses.add(new_addr)
-        included_addresses.append(old_addr)
     if log_skipped and skipped_for_log:
         _log_warning(f"Skipped {len(skipped_for_log)} resource(s) (module does not match key {repo_key!r})", "DBG-928")
         for addr in skipped_for_log[:5]:

@@ -237,6 +237,18 @@ Keys like `my-repo-v1.2` are supported; the script uses `re.escape` so dots and 
 
 ---
 
+## Address matching (state list)
+
+The script compares resources from `terraform state list` with the transformed state. To avoid false "partial match: N requested resources not in transformed state" messages, it:
+
+- Builds **one address per instance** in the same format as `terraform state list`: with index suffix `[0]`, `[1]`, or `["key"]` for count/for_each resources.
+- Uses the **data.** prefix for data sources (e.g. `data.github_team.team["xxx"]`).
+- **Normalizes** address strings (e.g. quote escaping) so differences between state list and state JSON do not cause mismatches.
+
+If you still see a partial match, the requested state list may include resources whose module path does not contain the given repo key, or addresses that differ in another way; use `--force` only when you intend to push a subset.
+
+---
+
 ## Exit codes
 
 | Code | Meaning |
