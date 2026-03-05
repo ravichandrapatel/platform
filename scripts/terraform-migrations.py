@@ -227,6 +227,15 @@ def get_resources_for_key(old_dir: Path, repo_key: str) -> List[str]:
     return resources
 
 
+def _normalize_state_address(addr: str) -> str:
+    """INTENT: Normalize state address so state-list and JSON formats match (e.g. quote escaping). INPUT: addr (str). OUTPUT: str. SIDE_EFFECTS: None."""
+    # Normalization avoids false "partial match / N requested resources not in transformed state" when
+    # terraform state list and state pull use slightly different address strings for the same resource.
+    if not addr:
+        return addr
+    return addr.replace('\\"', '"').strip()
+
+
 def extract_and_transform_state(
     old_state: Dict[str, Any],
     repo_key: str,
@@ -244,7 +253,8 @@ def extract_and_transform_state(
         res_type = resource.get("type", "")
         res_name = resource.get("name", "")
         old_addr = f"{res_mod}.{res_type}.{res_name}" if res_mod else f"{res_type}.{res_name}"
-        if search_pattern not in res_mod:
+        res_mod_normalized = _normalize_state_address(res_mod)
+        if search_pattern not in res_mod and search_pattern not in res_mod_normalized:
             skipped_for_log.append(old_addr)
             continue
         new_mod_path = res_mod.replace(search_pattern, "[0]")
@@ -284,7 +294,11 @@ def extract_and_transform_state(
     }
     requested_set = set(resource_addrs)
     included_set = set(included_addresses)
-    missing = requested_set - included_set
+    normalized_included = {_normalize_state_address(a) for a in included_addresses}
+    missing = [
+        r for r in resource_addrs
+        if _normalize_state_address(r) not in normalized_included
+    ]
     return (new_state, included_addresses, list(missing))
 
 
