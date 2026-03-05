@@ -25,7 +25,7 @@ Migrate Terraform **for_each** configuration to **workspace-based** configuratio
 | `--old-dir` | Path to the **old** Terraform directory (for_each state) | *(required)* |
 | `--new-dir` | Path to the **new** Terraform directory (workspace-based) | *(required)* |
 | `--repo-key` | Repository key(s) to migrate; **comma-separated** for multiple | *(required)* |
-| `--tfvars-file` | TFVars file for `terraform plan` verification | — |
+| `--tfvars-file` | TFVars file(s) for verification; **comma-separated** = one per repo-key, or single = shared | — |
 | `--dry-run` | Show what would be done; no changes | `false` |
 | `--skip-verification` | Skip `terraform plan` after push | `false` |
 | `--auto-cleanup` | Remove migrated resources from old state after push | `false` |
@@ -87,6 +87,16 @@ Migrate Terraform **for_each** configuration to **workspace-based** configuratio
 
 ### 4. Use tfvars for verification
 
+**No `--tfvars-file` (auto-detect when verification runs):**
+
+If you omit `--tfvars-file` and do **not** use `--skip-verification`, the script looks in the **new** directory and its **subdirectories** for a file named `{repo-key}.tfvars` and uses it for `terraform plan` if found:
+
+- `{repo-key}.tfvars`
+
+Example: for `--repo-key my-app`, it checks `new-dir/my-app.tfvars` then any subdir (e.g. `new-dir/envs/prod/my-app.tfvars`). If found, verification runs with that file and a log line like “Using tfvars from new dir: …” is printed. If not found, plan runs without `-var-file`.
+
+**Single key (one tfvars):**
+
 ```bash
 ./terraform-migrations.py \
   --old-dir ./tf-old \
@@ -95,7 +105,31 @@ Migrate Terraform **for_each** configuration to **workspace-based** configuratio
   --tfvars-file production.tfvars
 ```
 
-- Runs `terraform plan -var-file=production.tfvars` after push to verify no unwanted changes
+- Runs `terraform plan -var-file=production.tfvars` after push to verify no unwanted changes.
+
+**Multiple keys with one shared tfvars:**
+
+```bash
+./terraform-migrations.py \
+  --old-dir ./tf-old \
+  --new-dir ./tf-new \
+  --repo-key "repo-a,repo-b,repo-c" \
+  --tfvars-file production.tfvars
+```
+
+- The same tfvars file is used for verification after each key.
+
+**Multiple keys with one tfvars per key:**
+
+```bash
+./terraform-migrations.py \
+  --old-dir ./tf-old \
+  --new-dir ./tf-new \
+  --repo-key "repo-a,repo-b,repo-c" \
+  --tfvars-file "repo-a.tfvars,repo-b.tfvars,repo-c.tfvars"
+```
+
+- Verification uses `repo-a.tfvars` for workspace `repo-a`, `repo-b.tfvars` for `repo-b`, and `repo-c.tfvars` for `repo-c`. The number of tfvars files must be **1** (shared) or **equal** to the number of repo keys.
 
 ---
 

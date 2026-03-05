@@ -1,0 +1,3 @@
+# terraform-migrations.py
+# No third-party dependencies; uses Python 3.9+ standard library only.
+# (argparse, json, pathlib, re, shutil, subprocess, sys, tempfile, time, typing)

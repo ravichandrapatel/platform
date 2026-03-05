@@ -381,6 +381,20 @@ def push_state(
     return False, []
 
 
+def find_tfvars_for_key(new_dir: Path, repo_key: str) -> Optional[str]:
+    """INTENT: Find a tfvars file in new_dir or its subdirs named {repo_key}.tfvars when --tfvars-file not provided. INPUT: new_dir (Path), repo_key (str). OUTPUT: Path as str or None. SIDE_EFFECTS: disk read."""
+    if not repo_key or "/" in repo_key or "\\" in repo_key:
+        return None
+    name = f"{repo_key}.tfvars"
+    p = new_dir / name
+    if p.exists() and p.is_file():
+        return str(p)
+    for path in new_dir.rglob(name):
+        if path.is_file():
+            return str(path)
+    return None
+
+
 def verify_migrations(new_dir: Path, tfvars_file: Optional[str], dry_run: bool) -> bool:
     """INTENT: Run terraform plan -detailed-exitcode; 0 = no changes (success), 2 = changes (failure). INPUT: new_dir, tfvars_file, dry_run. OUTPUT: bool. SIDE_EFFECTS: subprocess."""
     if dry_run:
@@ -437,7 +451,12 @@ def main() -> int:
         required=True,
         help="Repository key(s) to migrate; comma-separated for multiple (e.g. key1,key2,key3)",
     )
-    parser.add_argument("--tfvars-file", type=str, default=None, help="TFVars file to use for verification")
+    parser.add_argument(
+        "--tfvars-file",
+        type=str,
+        default=None,
+        help="TFVars file(s) for verification; comma-separated for multiple (one per repo-key, or single for all)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Dry run; no changes")
     parser.add_argument("--skip-verification", action="store_true", help="Skip terraform plan verification")
     parser.add_argument("--auto-cleanup", action="store_true", help="Remove migrated resources from old state")
@@ -483,6 +502,16 @@ def main() -> int:
         _log_error("No repo key(s) provided (--repo-key)", "DBG-910")
         return 1
 
+    tfvars_list: List[str] = []
+    if args.tfvars_file:
+        tfvars_list = [f.strip() for f in args.tfvars_file.split(",") if f.strip()]
+        if tfvars_list and len(tfvars_list) != 1 and len(tfvars_list) != len(repo_keys):
+            _log_error(
+                f"Number of tfvars files ({len(tfvars_list)}) must be 1 (use for all keys) or equal to number of repo keys ({len(repo_keys)}).",
+                "DBG-910",
+            )
+            return 1
+
     old_dir = Path(args.old_dir).resolve()
     new_dir = Path(args.new_dir).resolve()
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -495,8 +524,8 @@ def main() -> int:
         _log_warning("Dry run enabled. No changes will be made.", "DBG-001")
 
     _log(f"\n{SYM_INFO} Configuration: old={old_dir}, new={new_dir}, keys={', '.join(repo_keys)}", code="DBG-002")
-    if args.tfvars_file:
-        _log(f"  tfvars: {args.tfvars_file}", code="DBG-002")
+    if tfvars_list:
+        _log(f"  tfvars: {', '.join(tfvars_list)} (one per key)" if len(tfvars_list) == len(repo_keys) else f"  tfvars: {tfvars_list[0]} (shared)", code="DBG-002")
 
     _log_step("Step 1: Preflight checks", "DBG-002")
     if not old_dir.exists():
@@ -641,7 +670,14 @@ def main() -> int:
 
         _log_step("Step 7: Verify migrations", "DBG-014")
         if not args.skip_verification:
-            if not verify_migrations(new_dir, args.tfvars_file, args.dry_run):
+            tfvars_for_key: Optional[str] = None
+            if tfvars_list:
+                tfvars_for_key = tfvars_list[key_index] if len(tfvars_list) == len(repo_keys) else tfvars_list[0]
+            if tfvars_for_key is None:
+                tfvars_for_key = find_tfvars_for_key(new_dir, repo_key)
+                if tfvars_for_key:
+                    _log(f"  {SYM_INFO} Using tfvars from new dir: {tfvars_for_key}", code="DBG-014")
+            if not verify_migrations(new_dir, tfvars_for_key, args.dry_run):
                 _log_error("Verification failed", "DBG-922")
                 return 1
         else:
