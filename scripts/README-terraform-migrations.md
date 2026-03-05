@@ -1,9 +1,11 @@
 # Terraform Migrations Script
 
-Migrate Terraform **for_each** configuration to **workspace-based** configuration: backup state, extract resources by repo key, transform state (module path and `index_key`), create/select workspaces, push state, verify with `terraform plan`, and optionally remove migrated resources from the old state.
+Migrate Terraform from **for_each + count** to **workspace-based count**: one workspace per repo key, with module path `["repo_key"]` → `[0]` and instance key → `0`. The script backs up state, extracts resources by repo key, transforms state, create/selects workspaces, pushes state, verifies with `terraform plan`, and optionally removes migrated resources from the old state.
 
 **Version:** 1.2.0  
 **Requirements:** Python 3.9+, `terraform`, `aws` CLI on `PATH`. Terraform 1.5+ recommended.
+
+**Migration direction:** Old root uses `for_each` (e.g. over repos) and possibly `count` on resources; new root uses one workspace per repo and `count` (module index `[0]` for that repo).
 
 ---
 

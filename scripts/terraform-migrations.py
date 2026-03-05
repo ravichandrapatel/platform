@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 FILE_NAME: terraform-migrations.py
-DESCRIPTION: Migrate Terraform for_each configuration to workspace-based configuration:
-  backup state, extract resources by repo key, transform state (module path and index_key),
-  create/select workspace, push state, verify with plan, optional cleanup of old state.
+DESCRIPTION: Migrate Terraform from for_each (+ count) to workspace-based count:
+  backup state, extract resources by repo key, transform state (module path ["key"] -> [0],
+  instance index_key -> 0), create/select workspace, push state, verify with plan, optional cleanup.
 VERSION: 1.2.0
 EXIT_CODES: 0 = success, 1 = error (preflight, init, backup, transform, push, verify, or cleanup)
 AUTHORS: Platform / DevOps
@@ -274,17 +274,28 @@ def extract_and_transform_state(
             continue
         instances = resource.get("instances", [])
         new_instances = []
-        for instance in instances:
+        for i, instance in enumerate(instances):
             new_inst = dict(instance)
             idx = instance.get("index_key") or instance.get("index")
+            # Count-based resources may omit index in state: use position when multiple instances.
+            # Single instance with no index: add both bare and [0] so state list matches either form.
+            if idx is None:
+                if len(instances) > 1:
+                    idx = i
+                else:
+                    included_addresses.append(old_addr_base)  # match state list "type.name"
+                    idx = 0  # count=1 often shown as type.name[0] in state list
             if str(idx) == repo_key:
                 new_inst["index_key"] = 0
             # Keep "private" (provider metadata/checksums); stripping can trigger unnecessary recreations.
             new_instances.append(new_inst)
             # Build address matching terraform state list (one per instance, with [0] / ["key"] suffix).
+            # State list can show either module.path.resource.name or module.path.resource.name[0]; add both for single-instance.
             suffix = _instance_index_suffix(idx)
             instance_addr = old_addr_base + suffix
             included_addresses.append(instance_addr)
+            if len(instances) == 1 and suffix:
+                included_addresses.append(old_addr_base)  # bare form: ...resourcename (no [0])
         if not new_instances:
             continue
         new_resource = dict(resource)
@@ -306,13 +317,20 @@ def extract_and_transform_state(
         "lineage": old_state.get("lineage"),
         "resources": new_resources,
     }
-    requested_set = set(resource_addrs)
-    included_set = set(included_addresses)
     normalized_included = {_normalize_state_address(a) for a in included_addresses}
-    missing = [
-        r for r in resource_addrs
-        if _normalize_state_address(r) not in normalized_included
-    ]
+
+    def _is_included(req: str) -> bool:
+        n = _normalize_state_address(req)
+        if n in normalized_included:
+            return True
+        # State list and state JSON may differ (e.g. module path); match if any included ends with .<req>.
+        if "." in n:
+            for inc in included_addresses:
+                if _normalize_state_address(inc).endswith("." + n):
+                    return True
+        return False
+
+    missing = [r for r in resource_addrs if not _is_included(r)]
     return (new_state, included_addresses, list(missing))
 
 
