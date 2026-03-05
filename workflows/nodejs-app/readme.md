@@ -36,7 +36,7 @@ on:
 
 jobs:
   nodejs-ci:
-    uses: YOUR_ORG/platform/.github/workflows/nodejs-app.yml@main
+    uses: YOUR_ORG/devtools-landingzone/.github/workflows/nodejs-app.yml@main
     with:
       node_version: '20'
       working_directory: '.'

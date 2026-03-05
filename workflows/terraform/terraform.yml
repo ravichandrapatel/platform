@@ -19,7 +19,7 @@ env:
   TF_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.terraform_version || '1.9.0' }}
   TF_EXEC_IAM_ROLE: ${{ github.event_name == 'workflow_dispatch' && inputs.terraform_exec_iam_role || '' }}
   TF_EXEC_ROLE_REGION: ${{ github.event_name == 'workflow_dispatch' && inputs.terraform_exec_role_region || 'us-east-1' }}
-  TF_OPA_POLICY_PATH: ${{ github.event_name == 'workflow_dispatch' && inputs.opa_policy_path || 'platform/policies/terraform' }}
+  TF_OPA_POLICY_PATH: ${{ github.event_name == 'workflow_dispatch' && inputs.opa_policy_path || 'devtools-landingzone/policies/terraform' }}
   # Skip refresh in CI so plan uses state (e.g. from daily refresh). Set to false to re-fetch data sources every plan.
   TF_SKIP_REFRESH: ${{ vars.TF_SKIP_REFRESH != 'false' && 'true' || 'false' }}
 
@@ -53,9 +53,9 @@ on:
         required: false
         default: 'us-east-1'
       opa_policy_path:
-        description: 'Path to OPA/Rego policy bundle for plan evaluation (e.g. platform/policies/terraform)'
+        description: 'Path to OPA/Rego policy bundle for plan evaluation (e.g. devtools-landingzone/policies/terraform)'
         required: false
-        default: 'platform/policies/terraform'
+        default: 'devtools-landingzone/policies/terraform'
 
 jobs:
   # ===========================================================================
@@ -95,7 +95,7 @@ jobs:
       # Step 1.3: Run git-path-filter; output changes_json.tfvars (has_changes, files)
       - name: Detect changes (git-path-filter)
         id: changes
-        uses: ./platform/actions/git-path-filter
+        uses: ./devtools-landingzone/actions/git-path-filter
         with:
           source_branch: ${{ steps.refs.outputs.source }}
           base_ref_branch: ${{ steps.refs.outputs.base }}

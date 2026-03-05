@@ -94,7 +94,7 @@ jobs:
 
       - name: Detect changes (git-path-filter)
         id: changes
-        uses: ./platform/actions/git-path-filter
+        uses: ./devtools-landingzone/actions/git-path-filter
         with:
           source_branch: ${{ github.head_ref }}
           base_ref_branch: ${{ github.base_ref }}
@@ -138,7 +138,7 @@ jobs:
 
       - name: Detect changes (git-path-filter)
         id: changes
-        uses: ./platform/actions/git-path-filter
+        uses: ./devtools-landingzone/actions/git-path-filter
         with:
           source_branch: ${{ steps.refs.outputs.source }}
           base_ref_branch: ${{ steps.refs.outputs.base }}
@@ -173,7 +173,7 @@ jobs:
 
       - name: Detect changes (git-path-filter)
         id: changes
-        uses: ./platform/actions/git-path-filter
+        uses: ./devtools-landingzone/actions/git-path-filter
         with:
           source_branch: ${{ github.ref_name }}
           base_ref_branch: ${{ github.event.repository.default_branch }}
@@ -221,7 +221,7 @@ jobs:
 
       - name: Detect changes (git-path-filter)
         id: changes
-        uses: ./platform/actions/git-path-filter
+        uses: ./devtools-landingzone/actions/git-path-filter
         with:
           source_branch: ${{ steps.refs.outputs.source }}
           base_ref_branch: ${{ steps.refs.outputs.base }}
@@ -253,7 +253,7 @@ Optional: filter by change type (e.g. only added or modified):
 ```yaml
       - name: Detect changes (git-path-filter)
         id: changes
-        uses: ./platform/actions/git-path-filter
+        uses: ./devtools-landingzone/actions/git-path-filter
         with:
           source_branch: ${{ steps.refs.outputs.source }}
           base_ref_branch: ${{ steps.refs.outputs.base }}
@@ -287,7 +287,7 @@ jobs:
 
       - name: Detect changes
         id: changes
-        uses: ./platform/actions/git-path-filter
+        uses: ./devtools-landingzone/actions/git-path-filter
         with:
           source_branch: ${{ github.head_ref }}
           base_ref_branch: ${{ github.base_ref }}

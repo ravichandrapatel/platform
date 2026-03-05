@@ -10,7 +10,7 @@ Canonical source for the **Compliance** workflow.
 
 ## Where it lives
 
-- **Source:** `platform/workflows/compliance/compliance.yml`
+- **Source:** `devtools-landingzone/workflows/compliance/compliance.yml`
 - **Published:** `.github/workflows/compliance.yml` (so GitHub runs it on schedule and `workflow_dispatch`).
 
 Pipeline security aligns with **OWASP SPVS**; see [owasp-spvs.md](../../owasp-spvs.md) and [devsecops-spvs-standard.md](../../devsecops-spvs-standard.md).

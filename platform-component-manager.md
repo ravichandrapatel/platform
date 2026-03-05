@@ -8,7 +8,7 @@ It owns the full lifecycle for **actions** and **reusable workflows**:
 - **Rollbacks** to any previous stable version
 - **SemVer safety**, **tag pruning**, **environments**, and **auto‑changelog**
 
-The workflow file is `platform/.github/workflows/platform-component-manager.yml`.
+The workflow file is `devtools-landingzone/.github/workflows/platform-component-manager.yml`.
 
 ### Summary checklist (perfection)
 
@@ -91,14 +91,14 @@ flowchart TD
   - Releases are just tags on the **main** branch; the action code stays in the monorepo.
 
 - **Reusable workflows:**  
-  `workflows/<name>/` or `platform/workflows/<name>/`  
-  - Source of truth lives under `workflows/` or `platform/workflows/`.  
+  `workflows/<name>/` or `devtools-landingzone/workflows/<name>/`  
+  - Source of truth lives under `workflows/` or `devtools-landingzone/workflows/`.  
   - On **promote**, the workflow copies that folder’s `.yml` files into `.github/workflows/` and commits them; GitHub only runs workflows from `.github/workflows/`.  
 
 Together, this gives you a single release pipeline for:
 
 - **Platform actions** (under `actions/`)
-- **Platform workflows** (under `workflows/` / `platform/workflows/`)
+- **Platform workflows** (under `workflows/` / `devtools-landingzone/workflows/`)
 
 Any path **`actions/<name>`** or **`workflows/<name>`** that exists and passes validation can be released (RC → promote) or rolled back; there is no hardcoded list of components.
 
@@ -171,7 +171,7 @@ What it does, per mode:
     - Ensure its commit **matches `main` HEAD**; if not, fail the promotion.  
     - This guarantees you only promote code that was really tested as that RC.
   - **Workflow sync (type = workflow):**
-    - Copy `workflows/<name>/*.yml` (or `platform/workflows/<name>`) into `.github/workflows/`.
+    - Copy `workflows/<name>/*.yml` (or `devtools-landingzone/workflows/<name>`) into `.github/workflows/`.
     - Commit and push to `main`. This new commit becomes the tag target.
   - **Tagging:**
     - Determine `PREV_TAG` (latest `path/[0-9]*` before creating this one).  
@@ -205,7 +205,7 @@ What it does, per mode:
 
 | Input | Required | Description |
 |-------|----------|-------------|
-| `component_path` | Yes | Platform component path: `actions/<name>` or `workflows/<name>` / `platform/workflows/<name>`. Must be a folder. |
+| `component_path` | Yes | Platform component path: `actions/<name>` or `workflows/<name>` / `devtools-landingzone/workflows/<name>`. Must be a folder. |
 | `version` | Yes | Semantic version (e.g. `1.2.0`). For `rc`, it is the RC version; for `promote`, the released version; for `rollback`, the version to point the stable tag at. |
 | `mode` | Yes | `rc`, `promote`, or `rollback`. |
 
@@ -236,7 +236,7 @@ At the platform level, this workflow provides:
 
 - A **single, opinionated release flow** for:
   - Platform GitHub **actions** (in `actions/`).
-  - Platform GitHub **workflows** (in `workflows/` / `platform/workflows/` → `.github/workflows/`).
+  - Platform GitHub **workflows** (in `workflows/` / `devtools-landingzone/workflows/` → `.github/workflows/`).
 - **Clear lifecycle states:**
   - `develop` + RC tags → staging.
   - `main` + full tags → production.

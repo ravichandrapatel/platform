@@ -59,7 +59,7 @@ Set `repo` to the **target repo** where the PR should appear. Use the **branch n
     git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/my-org/docs-site.git HEAD:docs-sync
 
 - name: Open PR in target repo
-  uses: my-org/platform/actions/prbot@main
+  uses: my-org/devtools-landingzone/actions/prbot@main
   with:
     repo: my-org/docs-site
     title: "Sync docs from platform"

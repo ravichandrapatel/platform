@@ -251,6 +251,24 @@ If you still see a partial match, the requested state list may include resources
 
 ---
 
+## State lock at Step 6 (push)
+
+The script runs **push** (Step 6) then **plan** (Step 7 verify). It does **not** run plan before push.
+
+If the lock error shows **operationTypePlan** (or similar), that lock is **not** from this script. It is from:
+
+- **Another process** – e.g. a drift-check workflow, scheduled plan, or CI job running `terraform plan` (or apply) against the **same** state path (same backend key/workspace) you are pushing to.
+- **A stale lock** – a previous plan/apply that crashed or was killed and never released the lock in the backend (e.g. DynamoDB).
+
+**What to do:**
+
+- Ensure no other job or user runs `terraform plan` or `terraform apply` against the **new** dir’s state (that workspace/path) while you run the migration.
+- If the lock is stale: in the **new** dir run `terraform force-unlock -force <LOCK_ID>` (use the Lock ID from the error), then re-run the migration.
+
+**"cannot import state N over new state with serial M"** – The backend already has state with a higher serial than the transformed state (serial 1). Use **`--force-replace-state`** so the script runs `terraform state push -force` and overwrites the destination state.
+
+---
+
 ## Exit codes
 
 | Code | Meaning |

@@ -50,7 +50,7 @@ Idempotent GitHub Action for creating, updating, closing, or upserting issues wi
 ```yaml
 - name: Upsert drift issue
   id: issue
-  uses: ./platform/actions/issues-bot
+  uses: ./devtools-landingzone/actions/issues-bot
   with:
     mode: upsert
     issue-title: "Infrastructure drift detected"

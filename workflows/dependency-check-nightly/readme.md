@@ -4,7 +4,7 @@ Builds and pushes the **owasp-dependency-check** container image to GHCR.
 
 ## Purpose
 
-- Build the image from `platform/images/owasp-dependency-check/` (UBI9, OWASP Dependency-Check CLI).
+- Build the image from `devtools-landingzone/images/owasp-dependency-check/` (UBI9, OWASP Dependency-Check CLI).
 - Push to the configured registry (e.g. `ghcr.io/org/owasp-dependency-check`) for use by the action and by compliance scans.
 
 ## When it runs

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the custom act runner image (no public image). Tags act-runner:latest.
-# Uses Docker or Podman; run from repo root or from platform/act/runner/.
+# Uses Docker or Podman; run from repo root or from devtools-landingzone/act/runner/.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

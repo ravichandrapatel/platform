@@ -55,9 +55,9 @@ jobs:
           RT="${{ steps.runtime.outputs.runtime }}"
           $RT build \
             --tag ${{ env.IMAGE_NAME }}:latest \
-            --file platform/images/owasp-dependency-check/Containerfile \
+            --file devtools-landingzone/images/owasp-dependency-check/Containerfile \
             --build-arg NVD_API_KEY="${{ secrets.NVD_API_KEY }}" \
-            platform/images/owasp-dependency-check
+            devtools-landingzone/images/owasp-dependency-check
 
       - name: Log in to registry
         run: |

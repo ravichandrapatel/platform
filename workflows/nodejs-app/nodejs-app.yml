@@ -198,8 +198,8 @@ jobs:
           fi
 
       - name: OWASP Dependency-Check (platform action)
-        uses: ./platform/actions/owasp-dependency-check
-        if: hashFiles('platform/actions/owasp-dependency-check/action.yml') != ''
+        uses: ./devtools-landingzone/actions/owasp-dependency-check
+        if: hashFiles('devtools-landingzone/actions/owasp-dependency-check/action.yml') != ''
         with:
           project: ${{ env.PROJECT_NAME }}
           path: ${{ env.WORKING_DIR }}
@@ -209,7 +209,7 @@ jobs:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
 
       - name: OWASP Dependency-Check (container image when action not in repo)
-        if: hashFiles('platform/actions/owasp-dependency-check/action.yml') == ''
+        if: hashFiles('devtools-landingzone/actions/owasp-dependency-check/action.yml') == ''
         run: |
           RT=$(command -v podman || command -v buildah)
           IMG="ghcr.io/${{ github.repository }}/owasp-dependency-check:latest"

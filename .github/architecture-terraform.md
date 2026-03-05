@@ -268,8 +268,8 @@ flowchart TB
 | Component | Type | Purpose |
 |------------|------|---------|
 | **terraform.yml** | Workflow | Defines triggers, env, jobs, steps. |
-| **platform/actions/git-path-filter** | Composite action | Detects changed files by pattern (tfvars). |
-| **platform/policies/terraform** | Rego bundle | OPA policies; default `plan.rego` (allow). |
+| **devtools-landingzone/actions/git-path-filter** | Composite action | Detects changed files by pattern (tfvars). |
+| **devtools-landingzone/policies/terraform** | Rego bundle | OPA policies; default `plan.rego` (allow). |
 | **actions/checkout@v4** | Action | Checkout repo. |
 | **actions/create-github-app-token@v2** | Action | Create installation token for private Git module repos (when `TF_MODULES_APP_ID` set). |
 | **hashicorp/setup-terraform@v3** | Action | Install Terraform. |

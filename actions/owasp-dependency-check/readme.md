@@ -21,7 +21,7 @@ The container image is built and pushed by this repo’s **OWASP Dependency-Chec
 - uses: actions/checkout@v4
 
 - name: OWASP Dependency-Check
-  uses: ./platform/actions/owasp-dependency-check
+  uses: ./devtools-landingzone/actions/owasp-dependency-check
   with:
     project: my-app
     path: .
@@ -36,7 +36,7 @@ Pin to a tag for stability. You must pass the **image** input because the defaul
 - uses: actions/checkout@v4
 
 - name: OWASP Dependency-Check
-  uses: YOUR_ORG/IDP/platform/actions/owasp-dependency-check@v1.0.0
+  uses: YOUR_ORG/IDP/devtools-landingzone/actions/owasp-dependency-check@v1.0.0
   with:
     project: my-app
     path: .
@@ -102,7 +102,7 @@ Reports are written under the workspace path given by `out` (default `reports`).
 ```yaml
 - uses: actions/checkout@v4
 - name: Dependency-Check
-  uses: ./platform/actions/owasp-dependency-check
+  uses: ./devtools-landingzone/actions/owasp-dependency-check
   with:
     project: my-service
     path: .
@@ -117,7 +117,7 @@ Reports are written under the workspace path given by `out` (default `reports`).
 ### Fail on high/critical (CVSS ≥ 7)
 
 ```yaml
-- uses: ./platform/actions/owasp-dependency-check
+- uses: ./devtools-landingzone/actions/owasp-dependency-check
   with:
     project: my-app
     path: .
@@ -130,7 +130,7 @@ Reports are written under the workspace path given by `out` (default `reports`).
 Keep a suppression XML in the repo (e.g. `dependency-check-suppressions.xml`) and reference it:
 
 ```yaml
-- uses: ./platform/actions/owasp-dependency-check
+- uses: ./devtools-landingzone/actions/owasp-dependency-check
   with:
     project: my-app
     path: .
@@ -145,7 +145,7 @@ Multiple files (or URLs): comma-separated, e.g. `suppression: suppressions.xml,h
 Reduces rate limiting and speeds up updates when `noupdate: false`:
 
 ```yaml
-- uses: ./platform/actions/owasp-dependency-check
+- uses: ./devtools-landingzone/actions/owasp-dependency-check
   with:
     project: my-app
     path: .
@@ -163,7 +163,7 @@ Create an [NVD API key](https://nvd.nist.gov/developers/request-an-api-key) and 
 - uses: actions/checkout@v4
 - name: Dependency-Check
   id: dc
-  uses: ./platform/actions/owasp-dependency-check
+  uses: ./devtools-landingzone/actions/owasp-dependency-check
   with:
     project: my-app
     path: .
@@ -180,7 +180,7 @@ Create an [NVD API key](https://nvd.nist.gov/developers/request-an-api-key) and 
 ### Scan a subdirectory
 
 ```yaml
-- uses: ./platform/actions/owasp-dependency-check
+- uses: ./devtools-landingzone/actions/owasp-dependency-check
   with:
     project: backend-api
     path: backend
@@ -190,7 +190,7 @@ Create an [NVD API key](https://nvd.nist.gov/developers/request-an-api-key) and 
 ### Exclude paths
 
 ```yaml
-- uses: ./platform/actions/owasp-dependency-check
+- uses: ./devtools-landingzone/actions/owasp-dependency-check
   with:
     project: my-app
     path: .

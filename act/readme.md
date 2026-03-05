@@ -13,16 +13,16 @@ We use a **local-only** runner image so act does not pull any public third-party
 
 ```bash
 # From repo root
-./platform/act/runner/build.sh
+./devtools-landingzone/act/runner/build.sh
 ```
 
-This builds **`act-runner:latest`** from `platform/act/runner/Containerfile` (Ubuntu 22.04 + git, python3, pip, buildah, gh). `run.sh` uses it by default with `-P ubuntu-latest=act-runner:latest --pull=false`. To use the default public image instead, pass **`--no-custom-image`**.
+This builds **`act-runner:latest`** from `devtools-landingzone/act/runner/Containerfile` (Ubuntu 22.04 + git, python3, pip, buildah, gh). `run.sh` uses it by default with `-P ubuntu-latest=act-runner:latest --pull=false`. To use the default public image instead, pass **`--no-custom-image`**.
 
 ## Layout
 
-- Workflows live in **`platform/.github/*.yml`** (not under `.github/workflows/`). act is pointed at that directory with `-W platform/.github`.
-- **Run act from the repository root** so that `./platform/actions/<name>` and paths like `platform/images/` resolve correctly.
-- **`platform/act/runner/`** holds the custom image Containerfile and `build.sh`.
+- Workflows live in **`devtools-landingzone/.github/*.yml`** (not under `.github/workflows/`). act is pointed at that directory with `-W devtools-landingzone/.github`.
+- **Run act from the repository root** so that `./devtools-landingzone/actions/<name>` and paths like `devtools-landingzone/images/` resolve correctly.
+- **`devtools-landingzone/act/runner/`** holds the custom image Containerfile and `build.sh`.
 
 ## Quick start
 
@@ -30,24 +30,24 @@ From the **repo root** (`IDP/`):
 
 ```bash
 # Build the custom runner image (required once)
-./platform/act/runner/build.sh
+./devtools-landingzone/act/runner/build.sh
 
 # List workflows and jobs (dry run)
-./platform/act/run.sh -n
+./devtools-landingzone/act/run.sh -n
 
 # Run a specific workflow (workflow_dispatch)
-./platform/act/run.sh dependency-check-nightly
+./devtools-landingzone/act/run.sh dependency-check-nightly
 
 # Run with secrets from a file
-./platform/act/run.sh dependency-check-nightly --secret-file platform/act/.env
+./devtools-landingzone/act/run.sh dependency-check-nightly --secret-file devtools-landingzone/act/.env
 ```
 
-Copy `platform/act/.env.example` to `platform/act/.env` (or your own secret file) and fill in values. Do not commit `.env`.
+Copy `devtools-landingzone/act/.env.example` to `devtools-landingzone/act/.env` (or your own secret file) and fill in values. Do not commit `.env`.
 
 ## run.sh usage
 
 ```text
-./platform/act/run.sh [OPTIONS] [WORKFLOW]
+./devtools-landingzone/act/run.sh [OPTIONS] [WORKFLOW]
 
 Options:
   -n, --dry-run       List jobs only, do not run
@@ -64,10 +64,10 @@ Workflow: base name of the workflow file without .yml (e.g. dependency-check-nig
 Examples:
 
 ```bash
-./platform/act/run.sh -n
-./platform/act/run.sh -n dependency-check-nightly
-./platform/act/run.sh dependency-check-nightly --secret-file platform/act/.env
-./platform/act/run.sh drift-check -j drift-audit --secret-file platform/act/.env
+./devtools-landingzone/act/run.sh -n
+./devtools-landingzone/act/run.sh -n dependency-check-nightly
+./devtools-landingzone/act/run.sh dependency-check-nightly --secret-file devtools-landingzone/act/.env
+./devtools-landingzone/act/run.sh drift-check -j drift-audit --secret-file devtools-landingzone/act/.env
 ```
 
 ## Workflow matrix
@@ -89,11 +89,11 @@ Examples:
 - **NVD_API_KEY**: Optional for dependency-check-nightly (NVD rate limits without it).
 - **AWS_* / OIDC**: For drift-check and terraform workflows; omit for local action-only tests.
 
-See `platform/act/.env.example` for a template. Pass secrets with `--secret-file` or `-s KEY=value`; never commit real secrets.
+See `devtools-landingzone/act/.env.example` for a template. Pass secrets with `--secret-file` or `-s KEY=value`; never commit real secrets.
 
 ## Tips
 
 - Use **`-n`** first to see which jobs would run and catch workflow syntax issues.
 - To test only a **single action** (e.g. `git-path-filter` or `drift-auditor`), run the smallest workflow that uses it, or use `-j` to run one job.
 - The **custom image** is used by default; use `--no-custom-image` only if you need the default public runner image.
-- Workflows that call **reusable workflows** (e.g. from another repo) may not resolve locally; prefer workflows that use only `./platform/actions/` and public actions.
+- Workflows that call **reusable workflows** (e.g. from another repo) may not resolve locally; prefer workflows that use only `./devtools-landingzone/actions/` and public actions.

@@ -27,8 +27,8 @@ The image is built for the ARC SCC in **overlays/rosadev/scc-github-arc.yaml**:
 ```bash
 buildah build -t gha-runner-scale-set-runner:latest \
   --build-arg TARGETPLATFORM=linux/amd64 \
-  -f platform/images/gha-runner-scale-set-runner/Containerfile \
-  platform/images/gha-runner-scale-set-runner
+  -f devtools-landingzone/images/gha-runner-scale-set-runner/Containerfile \
+  devtools-landingzone/images/gha-runner-scale-set-runner
 ```
 
 Or with podman:
@@ -36,8 +36,8 @@ Or with podman:
 ```bash
 podman build -t gha-runner-scale-set-runner:latest \
   --build-arg TARGETPLATFORM=linux/amd64 \
-  -f platform/images/gha-runner-scale-set-runner/Containerfile \
-  platform/images/gha-runner-scale-set-runner
+  -f devtools-landingzone/images/gha-runner-scale-set-runner/Containerfile \
+  devtools-landingzone/images/gha-runner-scale-set-runner
 ```
 
 Optional build args: `RUNNER_VERSION`, `RUNNER_UID` (default 1001), `RUNNER_GID` (default 123), `SUBUID_COUNT` (default 100000).

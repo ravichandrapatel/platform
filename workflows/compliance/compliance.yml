@@ -40,8 +40,8 @@ jobs:
       - name: List image folders (with Containerfile)
         id: list
         run: |
-          if [ -d "platform/images" ]; then
-            BASE=platform/images
+          if [ -d "devtools-landingzone/images" ]; then
+            BASE=devtools-landingzone/images
           else
             BASE=images
           fi
@@ -98,8 +98,8 @@ jobs:
       - name: Set image path
         id: path
         run: |
-          if [ -d "platform/images" ]; then
-            echo "dir=platform/images/${{ matrix.image }}" >> $GITHUB_OUTPUT
+          if [ -d "devtools-landingzone/images" ]; then
+            echo "dir=devtools-landingzone/images/${{ matrix.image }}" >> $GITHUB_OUTPUT
           else
             echo "dir=images/${{ matrix.image }}" >> $GITHUB_OUTPUT
           fi
@@ -130,12 +130,12 @@ jobs:
           cd "${{ steps.path.outputs.dir }}"
           trivy fs . --format json -o trivy-fs.json || true
 
-      # platform/scripts/trivy_merge_results.py (stdlib only) merges config+fs JSON and adds scan_date.
+      # devtools-landingzone/scripts/trivy_merge_results.py (stdlib only) merges config+fs JSON and adds scan_date.
       - name: Merge results and add scan date
         run: |
           SCAN_DATE=$(date -u +%Y-%m-%d)
-          if [ -f "platform/scripts/trivy_merge_results.py" ]; then
-            python3 platform/scripts/trivy_merge_results.py --dir "${{ steps.path.outputs.dir }}" --scan-date "$SCAN_DATE"
+          if [ -f "devtools-landingzone/scripts/trivy_merge_results.py" ]; then
+            python3 devtools-landingzone/scripts/trivy_merge_results.py --dir "${{ steps.path.outputs.dir }}" --scan-date "$SCAN_DATE"
           else
             python3 scripts/trivy_merge_results.py --dir "${{ steps.path.outputs.dir }}" --scan-date "$SCAN_DATE"
           fi
@@ -143,8 +143,8 @@ jobs:
       - name: Count Critical vulnerabilities
         id: critical
         run: |
-          if [ -f "platform/scripts/trivy_merge_results.py" ]; then
-            C=$(python3 platform/scripts/trivy_merge_results.py --print-critical-count --dir "${{ steps.path.outputs.dir }}")
+          if [ -f "devtools-landingzone/scripts/trivy_merge_results.py" ]; then
+            C=$(python3 devtools-landingzone/scripts/trivy_merge_results.py --print-critical-count --dir "${{ steps.path.outputs.dir }}")
           else
             C=$(python3 scripts/trivy_merge_results.py --print-critical-count --dir "${{ steps.path.outputs.dir }}")
           fi
@@ -212,8 +212,8 @@ jobs:
             [ -d "$dir" ] || continue
             name="${dir#trivy-}"
             name="${name%/}"
-            if [ -d "platform/images/$name" ]; then
-              cp "$dir/trivy-results.json" "platform/images/$name/"
+            if [ -d "devtools-landingzone/images/$name" ]; then
+              cp "$dir/trivy-results.json" "devtools-landingzone/images/$name/"
             elif [ -d "images/$name" ]; then
               cp "$dir/trivy-results.json" "images/$name/"
             fi
@@ -223,8 +223,8 @@ jobs:
       - name: Update compliance and readme with Python script
         run: |
           REPO="${{ github.repository }}"
-          if [ -f "platform/scripts/update_readme.py" ]; then
-            python3 platform/scripts/update_readme.py --repo "$REPO"
+          if [ -f "devtools-landingzone/scripts/update_readme.py" ]; then
+            python3 devtools-landingzone/scripts/update_readme.py --repo "$REPO"
           else
             python3 scripts/update_readme.py --repo "$REPO"
           fi
@@ -233,7 +233,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          for f in readme.md platform/readme.md compliance.md platform/compliance.md; do
+          for f in readme.md devtools-landingzone/readme.md compliance.md devtools-landingzone/compliance.md; do
             [ -f "$f" ] && ! git diff --quiet "$f" && git add "$f"
           done
           git diff --staged --quiet && echo "No changes" && exit 0

@@ -7,8 +7,8 @@ Production deployment for [Actions Runner Controller](https://github.com/actions
 | Path | Purpose |
 |------|--------|
 | **base/** | Namespace `arc-system` and default Helm values (`controller-values.yaml`, `scale-set-values.yaml`). |
-| **platform/images/gha-runner-scale-set-runner/** | Runner image (UBI9, non-root 1001:123). Build and use as the scale set runner image. See `platform/readme.md` and `overlays/rosadev/scc-github-arc.yaml`. |
-| **platform/images/gha-runner-scale-set-controller/** | Controller image (UBI9 instead of distroless). Build and set `image` in overlay `controller-values.yaml` to use it. |
+| **devtools-landingzone/images/gha-runner-scale-set-runner/** | Runner image (UBI9, non-root 1001:123). Build and use as the scale set runner image. See `devtools-landingzone/readme.md` and `overlays/rosadev/scc-github-arc.yaml`. |
+| **devtools-landingzone/images/gha-runner-scale-set-controller/** | Controller image (UBI9 instead of distroless). Build and set `image` in overlay `controller-values.yaml` to use it. |
 | **overlays/rosadev** | ROSA/OpenShift dev: SCC + ClusterRole + RoleBinding + controller + scale set (own values). |
 | **overlays/kubernetesdev** | Plain Kubernetes dev: controller + scale set (own values). |
 | **overlay-helm-rendered/** | Apply after `make generate` when OCI Helm is not available. |
@@ -54,7 +54,7 @@ The overlay includes SCCs and bindings for both the controller and the scale set
 
 ### Build, push runner image, and deploy with Kind (one script)
 
-From the **platform** repo root, you can build the runner image, push it to GHCR, create a Kind cluster, and deploy the scale set in one go:
+From the **devtools-landingzone** repo root, you can build the runner image, push it to GHCR, create a Kind cluster, and deploy the scale set in one go:
 
 1. **Create a GitHub PAT** at [github.com/settings/tokens](https://github.com/settings/tokens) with:
    - **repo** (full)
@@ -67,7 +67,7 @@ From the **platform** repo root, you can build the runner image, push it to GHCR
    export GITHUB_TOKEN=ghp_xxxx
    ./addons/arc/deploy-with-kind.sh
    ```
-   This will: build `platform/images/gha-runner-scale-set-runner`, tag and push to `ghcr.io/<org>/gha-runner-scale-set-runner:latest`, create a Kind cluster named `arc`, create the `arc-gh-secret` from `GITHUB_TOKEN`, and install the controller + scale set via Helm with the built image.
+   This will: build `devtools-landingzone/images/gha-runner-scale-set-runner`, tag and push to `ghcr.io/<org>/gha-runner-scale-set-runner:latest`, create a Kind cluster named `arc`, create the `arc-gh-secret` from `GITHUB_TOKEN`, and install the controller + scale set via Helm with the built image.
 
 3. **Override org/registry** (default: `ravichandrapatel` and `ghcr.io/ravichandrapatel/gha-runner-scale-set-runner:latest`):
    ```bash

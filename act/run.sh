@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Run act from repo root with platform/.github as workflow directory.
-# Usage: from repo root, ./platform/act/run.sh [OPTIONS] [WORKFLOW]
+# Run act from repo root with devtools-landingzone/.github as workflow directory.
+# Usage: from repo root, ./devtools-landingzone/act/run.sh [OPTIONS] [WORKFLOW]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-WORKFLOWS_DIR="$REPO_ROOT/platform/.github"
+WORKFLOWS_DIR="$REPO_ROOT/devtools-landingzone/.github"
 EVENT=workflow_dispatch
 DRY_RUN=""
 JOB=""
@@ -14,7 +14,7 @@ SECRETS=()
 WORKFLOW=""
 USE_CUSTOM_IMAGE=1
 
-# Custom act runner image (built with platform/act/runner/build.sh). No public image.
+# Custom act runner image (built with devtools-landingzone/act/runner/build.sh). No public image.
 ACT_RUNNER_IMAGE="act-runner:latest"
 # Podman uses localhost/ for local images when talking to Docker API
 if command -v podman &>/dev/null && ! command -v docker &>/dev/null; then
@@ -35,7 +35,7 @@ usage() {
   echo "WORKFLOW: base name of workflow file without .yml (e.g. dependency-check-nightly)."
   echo "          Omit to list all workflows. Run from repo root: $REPO_ROOT"
   echo ""
-  echo "Custom image: build with ./platform/act/runner/build.sh (required unless --no-custom-image)."
+  echo "Custom image: build with ./devtools-landingzone/act/runner/build.sh (required unless --no-custom-image)."
   exit 0
 }
 
@@ -58,7 +58,7 @@ if [[ ! -d "$WORKFLOWS_DIR" ]]; then
   exit 1
 fi
 
-# Act expects workflow files; we have .yml in platform/.github/
+# Act expects workflow files; we have .yml in devtools-landingzone/.github/
 if [[ -n "$WORKFLOW" ]]; then
   WF_PATH="$WORKFLOWS_DIR/${WORKFLOW}.yml"
   if [[ ! -f "$WF_PATH" ]]; then

@@ -11,13 +11,13 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'platform/actions/git-path-filter/**'
-      - 'platform/.github/workflows/test-path-filter.yml'
+      - 'devtools-landingzone/actions/git-path-filter/**'
+      - 'devtools-landingzone/.github/workflows/test-path-filter.yml'
   push:
     branches: [main]
     paths:
-      - 'platform/actions/git-path-filter/**'
-      - 'platform/.github/workflows/test-path-filter.yml'
+      - 'devtools-landingzone/actions/git-path-filter/**'
+      - 'devtools-landingzone/.github/workflows/test-path-filter.yml'
 
 jobs:
   test-path-filter:
@@ -40,7 +40,7 @@ jobs:
 
       - name: Test path-filter (** recursion and negation)
         id: filter
-        uses: ./platform/actions/git-path-filter
+        uses: ./devtools-landingzone/actions/git-path-filter
         with:
           source_branch: ${{ steps.refs.outputs.source }}
           base_ref_branch: ${{ steps.refs.outputs.base }}

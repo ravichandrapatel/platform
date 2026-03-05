@@ -49,7 +49,7 @@ jobs:
           aws-region: ${{ env.TF_EXEC_ROLE_REGION }}
 
       - name: Terraform Drift Auditor
-        uses: ./platform/actions/drift-auditor
+        uses: ./devtools-landingzone/actions/drift-auditor
         with:
           working_dir: ${{ env.TF_WORKING_DIR }}
           vars_folder: ${{ env.TF_VARS_FOLDER }}

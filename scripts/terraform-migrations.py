@@ -392,15 +392,20 @@ def push_state(
     dry_run: bool,
     max_lock_retries: int = 5,
     lock_retry_delays: Optional[List[float]] = None,
+    force_replace_state: bool = False,
 ) -> Tuple[bool, List[str]]:
-    """INTENT: Push state file into new_dir with retries on state lock; return success and list of state addresses. INPUT: new_dir, state_file, dry_run, max_lock_retries, lock_retry_delays. OUTPUT: (bool, List[str]). SIDE_EFFECTS: subprocess."""
+    """INTENT: Push state file into new_dir with retries on state lock; return success and list of state addresses. INPUT: new_dir, state_file, dry_run, max_lock_retries, lock_retry_delays, force_replace_state. OUTPUT: (bool, List[str]). SIDE_EFFECTS: subprocess."""
     if dry_run:
         _log(f"{SYM_INFO} [DRY RUN] Would push state to {new_dir}", code="DBG-012")
         return True, []
     delays = lock_retry_delays or [5.0, 10.0, 20.0, 30.0, 45.0]
+    push_cmd = ["terraform", "state", "push"]
+    if force_replace_state:
+        push_cmd.append("-force")
+    push_cmd.append(str(state_file))
     for attempt in range(max_lock_retries):
         return_code, stdout, stderr = run_command(
-            ["terraform", "state", "push", str(state_file)],
+            push_cmd,
             cwd=str(new_dir),
         )
         if return_code == 0:
@@ -419,9 +424,17 @@ def push_state(
                 "DBG-923",
             )
             _log(f"  {stderr[:300]}", code="DBG-923")
+            if "plan" in (stderr or "").lower():
+                _log("  (Lock with operationTypePlan is not from this script; plan runs after push. Another process may be running plan against this state, or the lock is stale.)", code="DBG-923")
             time.sleep(wait)
             continue
         _log_error(f"terraform state push failed in {new_dir}:\n{stderr}", "DBG-922")
+        if "plan" in (stderr or "").lower():
+            _log("  Hint: Plan runs only in Step 7 (after push). A plan lock means another process or a stale lock; use 'terraform force-unlock -force <LOCK_ID>' in new dir if stale.", code="DBG-922")
+        if "serial" in (stderr or "").lower() and "cannot import" in (stderr or "").lower():
+            if not force_replace_state:
+                _log("  Hint: Backend has a higher serial than the pushed state. Use --force-replace-state to push with -force and overwrite.", code="DBG-922")
+            return False, []
         return False, []
     _log_error("terraform state push failed after lock retries", "DBG-922")
     return False, []
@@ -703,6 +716,7 @@ def main() -> int:
                 False,
                 max_lock_retries=args.max_lock_retries,
                 lock_retry_delays=args.lock_delays,
+                force_replace_state=args.force_replace_state,
             )
             if not ok:
                 transformed_state_file.unlink(missing_ok=True)

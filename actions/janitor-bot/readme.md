@@ -315,4 +315,4 @@ No JSON config file is required; everything is driven by environment variables (
 
 ## License
 
-Same as the platform repo.
+Same as the devtools-landingzone repo.

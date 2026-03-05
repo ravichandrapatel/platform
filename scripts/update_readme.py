@@ -21,7 +21,7 @@ BADGE_MARKER = "<!-- COMPLIANCE_BADGE -->"
 
 
 def find_root() -> str:
-    """INTENT: Return platform root directory (contains images/ and readme.md). INPUT: None. OUTPUT: str. SIDE_EFFECTS: Disk (isdir/isfile)."""
+    """INTENT: Return devtools-landingzone root directory (contains images/ and readme.md). INPUT: None. OUTPUT: str. SIDE_EFFECTS: Disk (isdir/isfile)."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     root = os.path.dirname(script_dir)
     if os.path.isdir(os.path.join(root, "images")) and os.path.isfile(

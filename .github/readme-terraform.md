@@ -54,7 +54,7 @@ GitHub Actions workflow for Terraform: detect changed `.tfvars` files, run check
 
 - **Job:** `detect-changes`
 - **Purpose:** Find which `*.tfvars` files changed between source ref and base ref.
-- **Implementation:** In-repo action `platform/actions/git-path-filter` with pattern `tfvars: ['**/*.tfvars']`.
+- **Implementation:** In-repo action `devtools-landingzone/actions/git-path-filter` with pattern `tfvars: ['**/*.tfvars']`.
 - **Outputs:** `changes`, `changes_json` (contains `tfvars.has_changes`, `tfvars.files[]`).
 - **Steps:**
   - 1.1 Checkout (full history).
@@ -140,7 +140,7 @@ If `TF_WORKING_DIR` is set, the workflow resolves the var-file path relative to 
   - 6.3 Install OPA CLI
   - 6.4 For each `plan-*.json`, run `opa eval` with policy bundle at `TF_OPA_POLICY_PATH`; fail if `allow != true`.
 
-Policy path default: `platform/policies/terraform` (see `platform/policies/terraform/plan.rego`).
+Policy path default: `devtools-landingzone/policies/terraform` (see `devtools-landingzone/policies/terraform/plan.rego`).
 
 ---
 
@@ -191,7 +191,7 @@ Terraform does **not** support caching a data source for a fixed time. You can g
 | `terraform_version` | `1.9.0` | Terraform version. |
 | `terraform_exec_iam_role` | — | IAM role ARN for OIDC (plan/apply). |
 | `terraform_exec_role_region` | `us-east-1` | AWS region for that role. |
-| `opa_policy_path` | `platform/policies/terraform` | Path to Rego policy bundle. |
+| `opa_policy_path` | `devtools-landingzone/policies/terraform` | Path to Rego policy bundle. |
 
 **Private Terraform modules (GitHub)**
 

@@ -54,7 +54,7 @@ Format: newline- or comma-separated list, or a JSON array string.
 
 ```yaml
 - name: Terraform Drift Auditor
-  uses: ./platform/actions/drift-auditor
+  uses: ./devtools-landingzone/actions/drift-auditor
   with:
     vars_folder: 'envs'
     exclude: |
@@ -73,7 +73,7 @@ Format: newline- or comma-separated list, or a JSON array string.
     aws-region: ${{ vars.TF_EXEC_ROLE_REGION || 'us-east-1' }}
 
 - name: Terraform Drift Auditor
-  uses: ./platform/actions/drift-auditor
+  uses: ./devtools-landingzone/actions/drift-auditor
   with:
     working_dir: '.'
     vars_folder: 'envs'
@@ -93,14 +93,14 @@ Useful for testing or running outside GitHub Actions. You need Terraform install
 
 ```bash
 # From repo root (working_dir = .)
-python3 platform/actions/drift-auditor/drift_auditor.py \
+python3 devtools-landingzone/actions/drift-auditor/drift_auditor.py \
   --working-dir . \
   --vars-folder envs \
   --max-parallel 10
 
 # With backend config and GitHub issue (optional)
 export GITHUB_TOKEN=ghp_...
-python3 platform/actions/drift-auditor/drift_auditor.py \
+python3 devtools-landingzone/actions/drift-auditor/drift_auditor.py \
   --working-dir terraform \
   --vars-folder terraform/envs \
   --backend-config backend.hcl \
@@ -125,7 +125,7 @@ python3 platform/actions/drift-auditor/drift_auditor.py \
 
 ```bash
 # Exclude expected drift (repeatable or newline-separated in one value)
-python3 platform/actions/drift-auditor/drift_auditor.py \
+python3 devtools-landingzone/actions/drift-auditor/drift_auditor.py \
   --vars-folder envs \
   --exclude 'module.tags' \
   --exclude 'staging:module.legacy'

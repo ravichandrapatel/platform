@@ -65,12 +65,12 @@ Config is reloaded when the file mtime changes (e.g. ConfigMap update). Token is
    ```
 3. Create the namespace and ConfigMap, then apply the Deployment:
    ```bash
-   kubectl apply -f platform/addons/master-clock/manifests/namespace.yaml
-   kubectl apply -f platform/addons/master-clock/manifests/configmap-repos.yaml
+   kubectl apply -f devtools-landingzone/addons/master-clock/manifests/namespace.yaml
+   kubectl apply -f devtools-landingzone/addons/master-clock/manifests/configmap-repos.yaml
    # After ESO has created github-token in master-clock:
-   kubectl apply -f platform/addons/master-clock/manifests/deployment.yaml
+   kubectl apply -f devtools-landingzone/addons/master-clock/manifests/deployment.yaml
    ```
-   Or use Kustomize: from `platform/addons/master-clock`, run `kubectl apply -k .` (after uncommenting ESO resources in `kustomization.yaml` and configuring the generator).
+   Or use Kustomize: from `devtools-landingzone/addons/master-clock`, run `kubectl apply -k .` (after uncommenting ESO resources in `kustomization.yaml` and configuring the generator).
 
 ## Health
 

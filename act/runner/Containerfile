@@ -1,5 +1,5 @@
 # Custom act runner image – no public/third-party act image.
-# Used by platform/act/run.sh with -P ubuntu-latest=act-runner:latest --pull=false.
+# Used by devtools-landingzone/act/run.sh with -P ubuntu-latest=act-runner:latest --pull=false.
 # Base: Ubuntu 22.04 (no catthehacker/ubuntu or other public act image).
 
 FROM ubuntu:22.04
