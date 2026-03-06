@@ -1,33 +1,49 @@
+# =============================================================================
+# Platform Component Manager
+# =============================================================================
+# RC → Promote → Rollback for actions and reusable workflows. Tags use short
+# names (component-v1, component-X.Y.Z) from the last path segment; component_path
+# accepts any prefix (e.g. actions/name, workflows/name, <prefix>/actions|workflows/name).
+# Trigger: workflow_dispatch only. Branches: RC on develop; promote/rollback on main.
+#
+# ACTIONS: actions/checkout@v4, actions/attest-build-provenance@v2.
+# Third-party: bridgecrewio/checkov-action@v12 (component workflow + full-repo Checkov).
+# =============================================================================
+
 name: Platform Component Manager
 
 on:
   workflow_dispatch:
     inputs:
       component_path:
-        description: 'Path: actions/name OR workflows/name'
+        description: 'Path: actions/name, workflows/name, or <prefix>/actions|workflows/name'
         required: true
         type: string
       version:
-        description: 'Version (e.g., 1.2.0)'
-        required: true
+        description: 'Optional. Auto-derived: RC = latest on main + minor bump or 1.0.0; Promote = latest RC; Rollback = previous release'
+        required: false
         type: string
       mode:
-        description: 'Release Stage'
+        description: 'Release stage'
         required: true
         type: choice
         options:
-          - rc        # Create RC tag on DEVELOP branch
-          - promote   # Sync to MAIN and create STABLE tags
-          - rollback  # Revert stable pointer to previous version
+          - rc        # Create RC tag (component-X.Y.Z-rc) on develop
+          - promote   # Promote RC to main; create version + stable tags (component-X.Y.Z, component-v1)
+          - rollback  # Move stable pointer (component-v1) to previous version
 
 concurrency:
   group: pcm-${{ github.event.inputs.component_path }}
   cancel-in-progress: false
 
 jobs:
-  # ---------------------------------------------------------------------------
+  # =============================================================================
   # STAGE 1: INPUT & PATH VALIDATION
-  # ---------------------------------------------------------------------------
+  # =============================================================================
+  # Path/type validation; version derivation (component-v1 + last 10 version tags).
+  # RC gate (promote requires RC tag); SemVer gate; action metadata or Checkov on component; broken-link check.
+  # Outputs: type, component_path, component_name, version.
+  # =============================================================================
   validate:
     runs-on: ubuntu-latest
     permissions:
@@ -35,6 +51,7 @@ jobs:
     outputs:
       type: ${{ steps.check.outputs.type }}
       component_path: ${{ steps.check.outputs.component_path }}
+      component_name: ${{ steps.check.outputs.component_name }}
       version: ${{ steps.check.outputs.version }}
     steps:
       - &checkout-full
@@ -47,40 +64,94 @@ jobs:
         run: |
           # Shell-injection proof: allowlist only. Never use raw input in commands.
           PATH_NAME="${{ github.event.inputs.component_path }}"
-          VER="${{ github.event.inputs.version }}"
+          VER_INPUT="${{ github.event.inputs.version }}"
           MODE="${{ github.event.inputs.mode }}"
 
-          # 0. Strict input validation (allowlist: safe for git tag, cp, paths)
-          if ! [[ "$PATH_NAME" =~ ^(actions|workflows)/[a-zA-Z0-9_.-]+$ ]]; then
-            echo "::error::Invalid component_path (allowed: actions/name or workflows/name, alphanumeric/_.-)"
-            exit 1
-          fi
-          if ! [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Invalid version (allowed: SemVer X.Y.Z)"
+          # 0. Strict input validation: any prefix allowed, then (actions|workflows)/name; safe for git tag, cp, paths
+          if ! [[ "$PATH_NAME" =~ ^([a-zA-Z0-9_.-]+/)*(actions|workflows)/[a-zA-Z0-9_.-]+$ ]]; then
+            echo "::error::Invalid component_path (allowed: actions/name, workflows/name, or <prefix>/actions|workflows/name)"
             exit 1
           fi
 
           # 1. Path Check
           [[ -d "$PATH_NAME" ]] || { echo "::error::Path $PATH_NAME not found"; exit 1; }
 
-          # 2. Set Type (Workflow vs Action)
-          [[ "$PATH_NAME" == workflows/* ]] && echo "type=workflow" >> "$GITHUB_OUTPUT" || echo "type=action" >> "$GITHUB_OUTPUT"
+          # 2. Set Type and component name (last path segment; used for short tag names: component-v1, component-1.0.0)
+          [[ "$PATH_NAME" == workflows/* || "$PATH_NAME" == *"/workflows/"* ]] && echo "type=workflow" >> "$GITHUB_OUTPUT" || echo "type=action" >> "$GITHUB_OUTPUT"
           echo "component_path=$PATH_NAME" >> "$GITHUB_OUTPUT"
+          COMPONENT_NAME="${PATH_NAME##*/}"
+          echo "component_name=$COMPONENT_NAME" >> "$GITHUB_OUTPUT"
+
+          # 3. Resolve version: use input if valid SemVer, else derive (component-v1 + last 10 version tags)
+          if [[ -n "$VER_INPUT" && "$VER_INPUT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            VER="$VER_INPUT"
+          else
+            COMPONENT_NAME="${PATH_NAME##*/}"
+            if [[ "$MODE" == "rc" ]]; then
+              # Use "latest on main" as starting point: the version that v1 points to (canonical current release)
+              STABLE_TAG="${COMPONENT_NAME}-v1"
+              V1_SHA=$(git rev-parse "$STABLE_TAG" 2>/dev/null || true)
+              LATEST=""
+              if [[ -n "$V1_SHA" ]]; then
+                V1_POINTS_TO=$(git tag -l "${COMPONENT_NAME}-[0-9]*" | while IFS= read -r t; do
+                  [[ -z "$t" ]] && continue
+                  [[ "$(git rev-parse "$t" 2>/dev/null)" == "$V1_SHA" ]] && echo "$t" && break
+                done)
+                [[ -n "$V1_POINTS_TO" ]] && LATEST=$(echo "$V1_POINTS_TO" | sed -e "s#^${COMPONENT_NAME}-##")
+              fi
+              # Fallback: highest version tag in repo (e.g. no v1 yet)
+              if [[ -z "$LATEST" ]]; then
+                LATEST=$(git tag -l "${COMPONENT_NAME}-[0-9]*" | sed -e "s#^${COMPONENT_NAME}-##" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
+              fi
+              if [[ -z "$LATEST" ]]; then
+                VER="1.0.0"
+              else
+                MAJOR=$(echo "$LATEST" | awk -F. '{print $1}')
+                MINOR=$(echo "$LATEST" | awk -F. '{print $2+1}')
+                PATCH=0
+                VER="${MAJOR}.${MINOR}.${PATCH}"
+              fi
+              echo "::notice::Version derived for RC: $VER (latest on main + minor bump or 1.0.0)"
+            elif [[ "$MODE" == "promote" ]]; then
+              RC_LATEST=$(git tag -l "${COMPONENT_NAME}-*-rc" | sed -e "s#^${COMPONENT_NAME}-##" -e 's/-rc$//' | sort -V -r | head -n 1 || true)
+              if [[ -z "$RC_LATEST" ]]; then
+                echo "::error::No RC tag found for $PATH_NAME. Run RC mode on develop first."
+                exit 1
+              fi
+              VER="$RC_LATEST"
+              echo "::notice::Version derived for Promote: $VER (latest RC)"
+            elif [[ "$MODE" == "rollback" ]]; then
+              PREV=$(git tag -l "${COMPONENT_NAME}-[0-9]*" | sed -e "s#^${COMPONENT_NAME}-##" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V -r | sed -n '2p' || true)
+              if [[ -z "$PREV" ]]; then
+                echo "::error::No previous version to roll back to for $PATH_NAME. Provide version input."
+                exit 1
+              fi
+              VER="$PREV"
+              echo "::notice::Version derived for Rollback: $VER (previous release)"
+            else
+              echo "::error::Invalid mode or version required"
+              exit 1
+            fi
+          fi
+
+          if ! [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version (allowed: SemVer X.Y.Z)"
+            exit 1
+          fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"
 
-          # 3. PROMOTION GATE: Verify RC tag exists if promoting to main
+          # 4. PROMOTION GATE: Verify RC tag exists if promoting to main
           if [[ "$MODE" == "promote" ]]; then
-            RC_TAG="${PATH_NAME}/${VER}-rc"
+            RC_TAG="${COMPONENT_NAME}-${VER}-rc"
             if ! git rev-parse "$RC_TAG" >/dev/null 2>&1; then
               echo "::error::Gate Denied: No RC tag found ($RC_TAG). You must run 'rc' mode on develop first."
               exit 1
             fi
             echo "RC Tag verified. Proceeding."
 
-            # 4. SemVer gate: ensure new version is greater than existing versions for this component
-            # Only consider full release tags like path/1.2.3 (exclude RC tags such as path/1.2.3-rc)
-            EXISTING_VERSIONS=$(git tag -l "${PATH_NAME}/*" \
-              | sed -e "s#^${PATH_NAME}/##" \
+            # 5. SemVer gate: ensure new version is greater than existing versions for this component
+            EXISTING_VERSIONS=$(git tag -l "${COMPONENT_NAME}-[0-9]*" \
+              | sed -e "s#^${COMPONENT_NAME}-##" \
               | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
               | sort -V || true)
             if [[ -n "$EXISTING_VERSIONS" ]]; then
@@ -150,9 +221,12 @@ jobs:
           done < <(find . -name "*.md" -not -path "./.git/*" -print0)
           [[ $FAILED -eq 0 ]] || exit 1
 
-  # ---------------------------------------------------------------------------
+  # =============================================================================
   # STAGE 2: SECURITY (SPVS) – FULL PLATFORM REPO
-  # ---------------------------------------------------------------------------
+  # =============================================================================
+  # Checkov (GitHub Actions) on entire repo; ShellCheck on all .sh. Full platform SPVS alignment.
+  # Must pass before execute. Needs: validate.
+  # =============================================================================
   security-spvs:
     needs: validate
     runs-on: ubuntu-latest
@@ -180,9 +254,12 @@ jobs:
             echo "No .sh files found; skipping shellcheck."
           fi
 
-  # ---------------------------------------------------------------------------
-  # STAGE 2b: SPVS NATIVE SECURITY GATE (component-scoped, inlined)
-  # ---------------------------------------------------------------------------
+  # =============================================================================
+  # STAGE 2b: SPVS NATIVE SECURITY GATE (component-scoped)
+  # =============================================================================
+  # ShellCheck and Bandit on component path; least-privilege check (no write-all); attest build provenance.
+  # Must pass before execute. Needs: validate.
+  # =============================================================================
   security-gate:
     needs: validate
     runs-on: ubuntu-latest
@@ -209,11 +286,18 @@ jobs:
             echo "No .sh files under $COMPONENT_PATH; skipping shellcheck."
           fi
 
-      - name: Bandit (Python security, component path)
-        uses: tj-actions/bandit@v1
-        with:
-          targets: ${{ github.event.inputs.component_path }}
-          options: "-r -lll"
+      - name: Bandit (Python security, component path – CLI only)
+        run: |
+          set -euo pipefail
+          COMPONENT_PATH="${{ github.event.inputs.component_path }}"
+          if ! command -v bandit >/dev/null 2>&1; then
+            pip install --quiet bandit
+          fi
+          if find "$COMPONENT_PATH" -name '*.py' -print0 2>/dev/null | grep -qz .; then
+            bandit -r "$COMPONENT_PATH" -lll
+          else
+            echo "No Python files under $COMPONENT_PATH; skipping Bandit."
+          fi
 
       - name: Ensure least privilege (no write-all)
         run: |
@@ -230,9 +314,14 @@ jobs:
           subject-path: ${{ github.event.inputs.component_path }}
           subject-name: "component:${{ github.event.inputs.component_path }}"
 
-  # ---------------------------------------------------------------------------
+  # =============================================================================
   # STAGE 3: EXECUTION (RELEASE)
-  # ---------------------------------------------------------------------------
+  # =============================================================================
+  # Checkout target branch (develop for rc, main for promote/rollback). RC: create component-X.Y.Z-rc.
+  # Promote: workflow sync to .github/workflows (if workflow), create component-X.Y.Z and component-v1, prune old tags, changelog.
+  # Rollback: restore workflows from target tag, move component-v1 to target, delete rolled-back version tag. Attest release.
+  # Needs: validate, security-spvs, security-gate.
+  # =============================================================================
   execute:
     needs: [validate, security-spvs, security-gate]
     runs-on: ubuntu-latest
@@ -263,15 +352,16 @@ jobs:
         run: |
           # Use validated outputs from validate job (single source of truth; no re-evaluation).
           PATH_NAME="${{ needs.validate.outputs.component_path }}"
+          COMPONENT_NAME="${{ needs.validate.outputs.component_name }}"
           VER="${{ needs.validate.outputs.version }}"
           MODE="${{ github.event.inputs.mode }}"
           TYPE="${{ needs.validate.outputs.type }}"
-
-          MAJOR="v${VER%%.*}"
+          # Tag format: component-v1 (stable), component-X.Y.Z (version). Consumer: uses: ORG/REPO/<component_path>@<component_name>-v1
+          STABLE_TAG="${COMPONENT_NAME}-v1"
 
           if [[ "$MODE" == "rc" ]]; then
             # --- RC MODE (Develop Branch) ---
-            TAG="${PATH_NAME}/${VER}-rc"
+            TAG="${COMPONENT_NAME}-${VER}-rc"
             git tag -f "$TAG"
             git push origin "$TAG" --force
             echo "::notice::RC Tag $TAG created on develop."
@@ -280,7 +370,7 @@ jobs:
             # --- PROMOTE MODE (Main Branch) ---
 
             # 0. Integrity failure check: RC tag SHA must match main HEAD before any stable tags
-            RC_TAG="${PATH_NAME}/${VER}-rc"
+            RC_TAG="${COMPONENT_NAME}-${VER}-rc"
             if ! git rev-parse "$RC_TAG" >/dev/null 2>&1; then
               echo "::error::INTEGRITY FAILURE: RC tag $RC_TAG not found. Promotion blocked."
               exit 1
@@ -311,48 +401,58 @@ jobs:
                git push origin main
             fi
 
-            # 2. Create Stable Tags
-            FULL_TAG="${PATH_NAME}/${VER}"
-            STABLE_MAJOR="${PATH_NAME}/${MAJOR}"
+            # 2. Create release tag and move stable pointer (v1 only; last 10 version tags kept below)
+            FULL_TAG="${COMPONENT_NAME}-${VER}"
 
             # Determine previous version tag (before creating the new one)
-            PREV_TAG=$(git tag -l "${PATH_NAME}/[0-9]*" | sort -V | tail -n 1 || true)
+            PREV_TAG=$(git tag -l "${COMPONENT_NAME}-[0-9]*" | sort -V | tail -n 1 || true)
 
             git tag -a "$FULL_TAG" -m "Release $VER"
-            git tag -f "$STABLE_MAJOR" -m "Moving $MAJOR pointer"
+            git tag -f "$STABLE_TAG" -m "Stable (latest release)"
             git push origin "$FULL_TAG"
-            git push origin "$STABLE_MAJOR" --force
+            git push origin "$STABLE_TAG" --force
 
             # 3. Cleanup RC tag
-            git push origin --delete "${PATH_NAME}/${VER}-rc" || true
+            git push origin --delete "${COMPONENT_NAME}-${VER}-rc" || true
 
-            # 4. ROLLING 5 PRUNING
-            echo "Pruning old tags for $PATH_NAME (keeping latest 5)..."
+            # 4. PRUNING: keep at least last 10 version tags; delete older only if beyond 10 and older than 14 days
+            PRUNE_DAYS=14
+            KEEP_LAST_N=10
+            CUTOFF_UNIX=$(($(date +%s) - PRUNE_DAYS*24*3600))
+            V1_SHA=$(git rev-parse "$STABLE_TAG" 2>/dev/null || true)
+            ALL_VERSION_TAGS=$(git tag -l "${COMPONENT_NAME}-[0-9]*" | sort -V -r || true)
+            PROTECTED=$(echo "$ALL_VERSION_TAGS" | head -n "$KEEP_LAST_N")
+            echo "Pruning version tags for $COMPONENT_NAME: keep last $KEEP_LAST_N; delete older than $PRUNE_DAYS days only if beyond that..."
 
-            # Get all version tags for this path (excluding major alias), newest first
-            ALL_TAGS=$(git tag -l "${PATH_NAME}/[0-9]*" | sort -V -r || true)
-
-            if [[ -n "$ALL_TAGS" ]]; then
-              COUNT=$(echo "$ALL_TAGS" | wc -l | tr -d ' ')
-              if [ "$COUNT" -gt 5 ]; then
-                TAGS_TO_DELETE=$(echo "$ALL_TAGS" | tail -n +6)
-                while IFS= read -r OLD_TAG; do
-                  [[ -z "$OLD_TAG" ]] && continue
-                  # Protected: never delete major pointers (path/v1, path/v2, ...)
-                  if [[ "$OLD_TAG" =~ /v[0-9]+$ ]]; then
-                    echo "Skipping protected major pointer: $OLD_TAG"
-                    continue
-                  fi
-                  # Only delete tags matching our allowlist (path/X.Y.Z)
-                  [[ "$OLD_TAG" =~ ^(actions|workflows)/[a-zA-Z0-9_.-]+/[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
-                  echo "Deleting old tag: $OLD_TAG"
-                  git tag -d "$OLD_TAG" 2>/dev/null || true
-                  git push origin --delete "$OLD_TAG" || true
-                done <<< "$TAGS_TO_DELETE"
+            echo "$ALL_VERSION_TAGS" | while IFS= read -r OLD_TAG; do
+              [[ -z "$OLD_TAG" ]] && continue
+              # Match component-X.Y.Z (glob; avoid regex so component name dots are literal)
+              [[ "$OLD_TAG" == "${COMPONENT_NAME}-"[0-9]*.[0-9]*.[0-9]* ]] || continue
+              echo "$PROTECTED" | grep -Fxq "$OLD_TAG" && echo "Skipping (in last $KEEP_LAST_N): $OLD_TAG" && continue
+              [[ -n "$V1_SHA" ]] && [[ "$(git rev-parse "$OLD_TAG" 2>/dev/null)" == "$V1_SHA" ]] && echo "Skipping (v1 points here): $OLD_TAG" && continue
+              TAG_DATE=$(git for-each-ref "refs/tags/${OLD_TAG}" --format='%(creatordate:unix)' 2>/dev/null)
+              [[ -z "$TAG_DATE" || ! "$TAG_DATE" =~ ^[0-9]+$ ]] && continue
+              if [[ $TAG_DATE -lt $CUTOFF_UNIX ]]; then
+                echo "Deleting tag (beyond last $KEEP_LAST_N and older than $PRUNE_DAYS days): $OLD_TAG"
+                git tag -d "$OLD_TAG" 2>/dev/null || true
+                git push origin --delete "$OLD_TAG" || true
               fi
-            fi
+            done
 
-            # 5. Auto-changelog between previous tag and current HEAD (path-scoped)
+            # 4b. Prune RC tags older than 14 days (so old RCs don't accumulate on develop)
+            echo "Pruning RC tags for $COMPONENT_NAME older than $PRUNE_DAYS days..."
+            git tag -l "${COMPONENT_NAME}-*-rc" | while IFS= read -r RC_TAG; do
+              [[ -z "$RC_TAG" ]] && continue
+              TAG_DATE=$(git for-each-ref "refs/tags/${RC_TAG}" --format='%(creatordate:unix)' 2>/dev/null)
+              [[ -z "$TAG_DATE" || ! "$TAG_DATE" =~ ^[0-9]+$ ]] && continue
+              if [[ $TAG_DATE -lt $CUTOFF_UNIX ]]; then
+                echo "Deleting RC tag (older than $PRUNE_DAYS days): $RC_TAG"
+                git tag -d "$RC_TAG" 2>/dev/null || true
+                git push origin --delete "$RC_TAG" || true
+              fi
+            done
+
+            # 5. Auto-changelog between previous tag and current HEAD (scoped to component path)
             if [[ -n "$PREV_TAG" && "$PREV_TAG" != "$FULL_TAG" ]]; then
               echo "Generating changelog from $PREV_TAG..HEAD for $PATH_NAME"
               {
@@ -360,18 +460,20 @@ jobs:
                 git log --oneline --pretty=format:"* %s (%h)" "$PREV_TAG"..HEAD -- "$PATH_NAME" || echo "* No commits found for path $PATH_NAME between $PREV_TAG and HEAD."
               } >> "$GITHUB_STEP_SUMMARY"
             else
-              echo "No previous version tag found for $PATH_NAME; skipping changelog."
+              echo "No previous version tag found for $COMPONENT_NAME; skipping changelog."
             fi
 
           elif [[ "$MODE" == "rollback" ]]; then
             # --- ROLLBACK MODE (Main Branch) ---
-            FULL_TAG="${PATH_NAME}/${VER}"
-            MAJOR_TAG="${PATH_NAME}/v$(echo "$VER" | cut -d. -f1)"
+            FULL_TAG="${COMPONENT_NAME}-${VER}"
 
             if ! git rev-parse "$FULL_TAG" >/dev/null 2>&1; then
               echo "::error::Cannot rollback; target tag not found: $FULL_TAG"
               exit 1
             fi
+
+            # Capture current v1 target (the release we're rolling back from; we'll delete its tag after moving v1)
+            V1_CURRENT_SHA=$(git rev-parse "$STABLE_TAG" 2>/dev/null || true)
 
             # State reversion: restore .github/workflows from target tag so main matches the tag
             if [[ "$TYPE" == "workflow" ]]; then
@@ -381,9 +483,22 @@ jobs:
               git diff --staged --quiet || { git commit -m "rollback($PATH_NAME): restore .github/workflows to $VER [skip ci]"; git push origin main; }
             fi
 
-            git tag -f "$MAJOR_TAG" -m "Stable $MAJOR_TAG" "$FULL_TAG"
-            git push origin "$MAJOR_TAG" --force
-            echo "::notice::Rolled back $MAJOR_TAG to $FULL_TAG."
+            git tag -f "$STABLE_TAG" -m "Stable (rollback to $VER)" "$FULL_TAG"
+            git push origin "$STABLE_TAG" --force
+            echo "::notice::Rolled back $STABLE_TAG to $FULL_TAG."
+
+            # Delete the version tag we rolled back from (e.g. 2.0.0 when rolling v1 to 1.9.5)
+            if [[ -n "$V1_CURRENT_SHA" && "$V1_CURRENT_SHA" != "$(git rev-parse "$FULL_TAG" 2>/dev/null)" ]]; then
+              git tag -l "${COMPONENT_NAME}-[0-9]*" | while IFS= read -r t; do
+                [[ -z "$t" ]] && continue
+                [[ "$t" == "$FULL_TAG" ]] && continue
+                if [[ "$(git rev-parse "$t" 2>/dev/null)" == "$V1_CURRENT_SHA" ]]; then
+                  echo "Deleting tag rolled back from: $t"
+                  git tag -d "$t" 2>/dev/null || true
+                  git push origin --delete "$t" || true
+                fi
+              done
+            fi
           fi
 
       - name: Attest build provenance (release)
@@ -392,18 +507,21 @@ jobs:
           subject-path: .
           subject-name: "release:${{ github.event.inputs.component_path }}@${{ github.event.inputs.version }}"
 
-  # ---------------------------------------------------------------------------
-  # ROLLBACK VALIDATION (runs only when mode is rollback, after execute)
-  # ---------------------------------------------------------------------------
+  # =============================================================================
+  # ROLLBACK VALIDATION
+  # =============================================================================
+  # Verify stable tag (component-v1) and target version tag (component-X.Y.Z) point to same commit.
+  # Runs only when mode is rollback. Needs: validate, execute.
+  # =============================================================================
   validate-rollback:
-    needs: execute
+    needs: [validate, execute]
     if: github.event.inputs.mode == 'rollback'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
-      COMPONENT_PATH: ${{ github.event.inputs.component_path }}
-      VERSION: ${{ github.event.inputs.version }}
+      COMPONENT_NAME: ${{ needs.validate.outputs.component_name }}
+      VERSION: ${{ needs.validate.outputs.version }}
     steps:
       - <<: *checkout-full
         name: Checkout (for git refs)
@@ -411,31 +529,33 @@ jobs:
       - name: Verify rollback pointer alignment
         run: |
           set -euo pipefail
-          # Shell-injection proof: use env vars only; allowlist already enforced in validate/execute
-          MAJOR="v${VERSION%%.*}"
-          MAJOR_TAG="${COMPONENT_PATH}/${MAJOR}"
-          FULL_TAG="${COMPONENT_PATH}/${VERSION}"
+          # Stable and version tags: component-v1, component-X.Y.Z (no path prefix in tag names)
+          STABLE_TAG="${COMPONENT_NAME}-v1"
+          FULL_TAG="${COMPONENT_NAME}-${VERSION}"
 
-          SHA_MAJOR=$(git rev-parse "$MAJOR_TAG")
+          SHA_STABLE=$(git rev-parse "$STABLE_TAG")
           SHA_FULL=$(git rev-parse "$FULL_TAG")
 
-          if [[ "$SHA_MAJOR" != "$SHA_FULL" ]]; then
-            echo "::error::Rollback validation failed: $MAJOR_TAG ($SHA_MAJOR) does not point to $FULL_TAG ($SHA_FULL). Broken stable state."
+          if [[ "$SHA_STABLE" != "$SHA_FULL" ]]; then
+            echo "::error::Rollback validation failed: $STABLE_TAG ($SHA_STABLE) does not point to $FULL_TAG ($SHA_FULL). Broken stable state."
             exit 1
           fi
 
           echo "### Rollback verification (SPVS audit trail)" >> "$GITHUB_STEP_SUMMARY"
           echo "| Check | Result |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Major tag | \`$MAJOR_TAG\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Stable tag (v1) | \`$STABLE_TAG\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Target tag | \`$FULL_TAG\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Commit SHA | \`$SHA_MAJOR\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit SHA | \`$SHA_STABLE\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Pointers match | Yes |" >> "$GITHUB_STEP_SUMMARY"
-          echo "::notice::Rollback verified: $MAJOR_TAG and $FULL_TAG both point to $SHA_MAJOR"
+          echo "::notice::Rollback verified: $STABLE_TAG and $FULL_TAG both point to $SHA_STABLE"
 
-  # ---------------------------------------------------------------------------
+  # =============================================================================
   # STAGE 4: AUDIT & SUMMARY
-  # ---------------------------------------------------------------------------
+  # =============================================================================
+  # Append release results to GITHUB_STEP_SUMMARY: validate, security-spvs, security-gate, execute status; component_path, mode.
+  # Always runs (if: always()). Needs: validate, security-spvs, security-gate, execute.
+  # =============================================================================
   audit:
     needs: [validate, security-spvs, security-gate, execute]
     if: always()

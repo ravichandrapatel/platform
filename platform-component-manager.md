@@ -102,6 +102,14 @@ Together, this gives you a single release pipeline for:
 
 Any path **`actions/<name>`** or **`workflows/<name>`** that exists and passes validation can be released (RC → promote) or rolled back; there is no hardcoded list of components.
 
+### Tagging standard
+
+- **main:** One stable pointer **component-v1** (e.g. `owasp-dependency-check-v1`; points to latest release on main) plus version tags (**component-X.Y.Z**); **at least the last 10 version tags** are kept; older are pruned only if beyond 10 and older than 14 days. No v2, v3, …; only **v1**.
+- **develop:** **RC tags** only (**component-X.Y.Z-rc**); multiple RCs are allowed (one per run).
+- Consumers use the **path** in `uses:` and the **short tag** after `@`: `uses: org/repo/devtools-landingzone/actions/owasp-dependency-check@owasp-dependency-check-v1`. Version tags (e.g. `@owasp-dependency-check-1.9.5`) are for rollback or pinning.
+
+**Full spec:** [TAGGING-STRATEGY.md](.github/TAGGING-STRATEGY.md) – lifecycle, tag states, consumer patterns, security gates.
+
 ---
 
 ## Jobs and environments
@@ -213,20 +221,22 @@ What it does, per mode:
 
 ## Tag model (after refactor)
 
-For a component `actions/my-action` and `version = 1.2.0`:
+Tags use the **component name** (last path segment). For `component_path = devtools-landingzone/actions/my-action` and `version = 1.2.0` (component name = `my-action`):
 
 - **RC tag (develop):**  
-  - `actions/my-action/1.2.0-rc`
+  - `my-action-1.2.0-rc`
 - **Full (stable) tag (main):**  
-  - `actions/my-action/1.2.0`
-- **Major alias (stable pointer, main):**  
-  - `actions/my-action/v1`
+  - `my-action-1.2.0`
+- **Stable pointer (main):**  
+  - `my-action-v1`
+
+**Consumer reference:** `uses: org/repo/devtools-landingzone/actions/my-action@my-action-v1`
 
 The workflow enforces:
 
 - No promotion without a matching `*-rc` tag.
 - No promotion that regresses relative to the latest existing full tag.
-- At most **5 full-version tags** per component prefix (older ones are pruned).
+- At least **last 10 full-version tags** kept; older pruned only if beyond 10 and older than 14 days.
 
 ---
 
@@ -247,7 +257,7 @@ At the platform level, this workflow provides:
   - **Full-repo SPVS security** (Stage 2): Checkov for all workflows, shellcheck for all shell scripts; release blocked until both pass.
   - Tag pruning and auto‑changelog for observability.
 
-Consumers across the platform can then **standardize on tag patterns** like `actions/my-action/1.2.0` or `actions/my-action/v1` and rely on this workflow to keep those refs correct, safe, and tidy over time.
+Consumers across the platform can then **standardize on** `uses: org/repo/devtools-landingzone/actions/my-action@my-action-v1` (latest) or `@my-action-1.2.0` (pinned) and rely on this workflow to keep those refs correct, safe, and tidy over time.
 
 ---
 
