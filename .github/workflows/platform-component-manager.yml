@@ -195,21 +195,19 @@ jobs:
       - name: Check for broken links (Markdown)
         run: |
           set -e
-          # Resolve links from repo root; only check in-repo paths
           ROOT="${{ github.workspace }}"
           FAILED=0
           while IFS= read -r -d '' f; do
             grep -oE '\]\([^)]+\)' "$f" | sed -E 's/^\]\(//;s/\)$//' | while read -r link; do
-              # Skip anchors-only or external URLs
-              case "$link" in
-                ""|#*|http://*|https://*|mailto:*) continue ;;
-              esac
-              # Resolve relative to file directory, then to repo root
+              [[ -z "$link" ]] && continue
+              [[ "$link" == '#'* ]] && continue
+              [[ "$link" == 'http://'* ]] && continue
+              [[ "$link" == 'https://'* ]] && continue
+              [[ "$link" == 'mailto:'* ]] && continue
               DIR=$(dirname "$f")
               TARGET="$DIR/$link"
               TARGET=$(realpath -m "$TARGET" 2>/dev/null || echo "$TARGET")
               [[ "$TARGET" == "$ROOT"* ]] || continue
-              # Strip fragment for file existence
               FILE="${link%%#*}"
               [[ -z "$FILE" ]] && continue
               CHECK=$(realpath --canonicalize-missing "$DIR/$FILE" 2>/dev/null || echo "")
