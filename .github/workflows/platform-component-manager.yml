@@ -54,7 +54,7 @@ jobs:
       component_name: ${{ steps.check.outputs.component_name }}
       version: ${{ steps.check.outputs.version }}
     steps:
-      - &checkout-full
+      - name: Checkout (full history)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -233,7 +233,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - *checkout-full
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Checkov – GitHub Actions (entire repo)
         uses: bridgecrewio/checkov-action@v12
@@ -271,8 +274,10 @@ jobs:
     env:
       COMPONENT_PATH: ${{ github.event.inputs.component_path }}
     steps:
-      - <<: *checkout-full
-        name: Checkout Code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: ShellCheck (Bash hardening, component path)
         run: |
@@ -523,8 +528,10 @@ jobs:
       COMPONENT_NAME: ${{ needs.validate.outputs.component_name }}
       VERSION: ${{ needs.validate.outputs.version }}
     steps:
-      - <<: *checkout-full
-        name: Checkout (for git refs)
+      - name: Checkout (for git refs)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Verify rollback pointer alignment
         run: |
