@@ -305,7 +305,18 @@ jobs:
       - name: Ensure least privilege (no write-all)
         run: |
           set -euo pipefail
-          if grep -r "write-all" .github/workflows/ 2>/dev/null; then
+          # Flag only actual permission usage; ignore comments, step name, and this step's own messages
+          if grep -rn "write-all" .github/workflows/ 2>/dev/null | while read -r line; do
+            rest="${line#*:}"
+            rest="${rest#*:}"
+            [[ "$rest" =~ ^[[:space:]]*# ]] && continue
+            [[ "$rest" == *"Violation"* ]] && continue
+            [[ "$rest" == *"granular"* ]] && continue
+            [[ "$rest" == *"No write-all"* ]] && continue
+            [[ "$rest" == *"Ensure least privilege"* ]] && continue
+            [[ "$rest" == *"no write-all"* ]] && [[ "$rest" == *"name:"* ]] && continue
+            echo "$line"
+          done | grep -q .; then
             echo "::error::Violation: write-all permissions detected. Use granular scopes."
             exit 1
           fi
