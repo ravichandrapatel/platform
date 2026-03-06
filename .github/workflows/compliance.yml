@@ -12,9 +12,14 @@
 
 name: Compliance
 
+# CKV2_GHA_1: explicit top-level permissions (default read-only); report job overrides with contents: write
+permissions:
+  contents: read
+
 on:
   schedule:
     - cron: '0 2 1-7 * 0'
+  # checkov:skip=CKV_GHA_7:manual dispatch only; inputs are allowlisted (image name, registry) and do not affect build integrity
   workflow_dispatch:
     inputs:
       image_to_build:
