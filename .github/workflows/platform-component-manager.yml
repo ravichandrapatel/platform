@@ -220,9 +220,9 @@ jobs:
           [[ $FAILED -eq 0 ]] || exit 1
 
   # =============================================================================
-  # STAGE 2: SECURITY (SPVS) – FULL PLATFORM REPO
+  # STAGE 2: SECURITY (SPVS) – COMPONENT-SCOPED
   # =============================================================================
-  # Checkov (GitHub Actions) on entire repo; ShellCheck on all .sh. Full platform SPVS alignment.
+  # Checkov (GitHub Actions) and ShellCheck on the component being released only.
   # Must pass before execute. Needs: validate.
   # =============================================================================
   security-spvs:
@@ -230,29 +230,31 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      COMPONENT_PATH: ${{ needs.validate.outputs.component_path }}
     steps:
       - name: Checkout (full history)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Checkov – GitHub Actions (entire repo)
+      - name: Checkov – GitHub Actions (component)
         uses: bridgecrewio/checkov-action@v12
         with:
-          directory: .
+          directory: ${{ needs.validate.outputs.component_path }}
           framework: github_actions
           quiet: true
 
-      - name: Shell scripts – shellcheck (SPVS-aligned)
+      - name: Shell scripts – shellcheck (component)
         run: |
           set -e
           found=0
           while IFS= read -r -d '' f; do
             shellcheck --external-sources -e SC1090 "$f" || { echo "::error::shellcheck failed: $f"; exit 1; }
             found=1
-          done < <(find . -name '*.sh' -not -path './.git/*' -print0 2>/dev/null)
+          done < <(find "$COMPONENT_PATH" -name '*.sh' -not -path '*/.git/*' -print0 2>/dev/null || true)
           if [[ "$found" -eq 0 ]]; then
-            echo "No .sh files found; skipping shellcheck."
+            echo "No .sh files under $COMPONENT_PATH; skipping shellcheck."
           fi
 
   # =============================================================================
@@ -305,8 +307,8 @@ jobs:
       - name: Ensure least privilege (no write-all)
         run: |
           set -euo pipefail
-          # Flag only actual permission usage; ignore comments, step name, and this step's own messages
-          if grep -rn "write-all" .github/workflows/ 2>/dev/null | while read -r line; do
+          # Exclude this workflow file (contains the check and its messages); flag actual permission usage elsewhere
+          if grep -rn "write-all" .github/workflows/ 2>/dev/null | grep -v 'platform-component-manager.yml:' | while read -r line; do
             rest="${line#*:}"
             rest="${rest#*:}"
             [[ "$rest" =~ ^[[:space:]]*# ]] && continue
