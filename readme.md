@@ -95,7 +95,7 @@ Details: see `readme.md` in each action folder.
 ### Compliance status
 
 <!-- COMPLIANCE_TABLE_START -->
-[![Compliance](https://github.com/ravichandrapatel/devtools-landingzone/actions/workflows/compliance.yml/badge.svg)](https://github.com/ravichandrapatel/devtools-landingzone/actions/workflows/compliance.yml)
+[![Compliance](https://github.com/ravichandrapatel/platform/actions/workflows/compliance.yml/badge.svg)](https://github.com/ravichandrapatel/platform/actions/workflows/compliance.yml)
 
 Full table: [compliance.md](compliance.md)
 <!-- COMPLIANCE_TABLE_END -->
